@@ -10,6 +10,7 @@ from player.arrow import Arrow
 from player.hammer import Hammer
 from enemy1 import Enemy
 from enemy2 import Enemy2
+from mobile_controls import MobileControls
 
 pygame.init() 
 
@@ -18,6 +19,10 @@ WIDTH, HEIGHT = 960, 540
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE | pygame.SCALED)
 pygame.display.set_caption("Pandava: Balance of Dharma")
 clock = pygame.time.Clock()
+
+# Virtual joystick + attack/dash buttons for mobile.
+# Set mobile_controls.visible = False to hide on desktop builds.
+mobile_controls = MobileControls(WIDTH, HEIGHT)
 FPS = 60
 
 # ================= LOAD ASSETS =================
@@ -32,15 +37,17 @@ card_arjuna     = pygame.transform.scale(card_arjuna,     (300, 400))
 card_bima       = pygame.transform.scale(card_bima,       (300, 400))
 
 relic_arjuna    = pygame.image.load("assets2/relic1.png").convert_alpha()
-relic_arjuna    = pygame.transform.scale(relic_arjuna, (15, 15))
+relic_arjuna    = pygame.transform.scale(relic_arjuna, (25, 25))
 relic_bima      = pygame.image.load("assets2/relic2.png").convert_alpha()
-relic_bima      = pygame.transform.scale(relic_bima, (15, 15))
+relic_bima      = pygame.transform.scale(relic_bima, (25, 25))
 relic_yudhistira = pygame.image.load("assets2/relic3.png").convert_alpha()
-relic_yudhistira = pygame.transform.scale(relic_yudhistira, (30, 30))
+relic_yudhistira = pygame.transform.scale(relic_yudhistira, (25, 25))
 relic_sadewa    = pygame.image.load("assets2/relic4.png").convert_alpha()
-relic_sadewa    = pygame.transform.scale(relic_sadewa, (15, 15))
+relic_sadewa    = pygame.transform.scale(relic_sadewa, (25, 25))
 relic_nakula    = pygame.image.load("assets2/relic5.png").convert_alpha()
-relic_nakula    = pygame.transform.scale(relic_nakula, (15, 15))
+relic_nakula    = pygame.transform.scale(relic_nakula, (25, 25))
+portal_resi     = pygame.image.load("assets2/portal_resi.png").convert_alpha()
+portal_resi     = pygame.transform.scale(portal_resi, (300, 300))
 
 bg_map1 = pygame.image.load("assets2/background7.jpeg").convert()
 bg_map1 = pygame.transform.scale(bg_map1, (WIDTH, HEIGHT))
@@ -75,8 +82,8 @@ BLUE   = (80,  160, 255)
 PURPLE = (180, 80,  255)
 
 # ================= TIMER DURATIONS (seconds) =================
+LOBBY_DURATION   = 5
 EXPLORE_DURATION = 60
-LOBBY_DURATION   = 0.25*EXPLORE_DURATION
 
 # ================= PHASE STATE =================
 phase         = "lobby"
@@ -89,6 +96,7 @@ SPAWN_POS      = (400, 300)
 
 # ================= PLAYER =================
 player  = Assasin(400, 300)
+player.mobile_controls = mobile_controls
 players = pygame.sprite.Group(player)
 
 # ================= ENEMIES =================
@@ -146,7 +154,9 @@ RELIC_OPTIONS = [
     {"name": "Batu Yudhistira", "img": relic_yudhistira},
     {"name": "Batu Sadewa",     "img": relic_sadewa},
     {"name": "Batu Nakula",     "img": relic_nakula},
+    {"name": "Portal Resi",     "img": portal_resi},
 ]
+
 
 def generate_relic():
     relic_map    = random.choice([3, 4, 5])
@@ -161,6 +171,7 @@ def generate_relic():
         "rect":      pygame.Rect(relic_pos[0] - 50, relic_pos[1] - 50, 100, 100),
     }
 
+
 relic       = generate_relic()
 relic_pulse = 0
 relic_notif_timer = 0
@@ -173,8 +184,9 @@ def draw_relic():
         return
 
     relic_pulse = (relic_pulse + 3) % 360
-    
+
     x, y = relic["pos"]
+
 
     # Gambar sprite relic
     screen.blit(relic["img"], relic["img"].get_rect(center=(x, y)))
@@ -312,6 +324,7 @@ def character_select():
                 if event.key == pygame.K_RETURN:
                     selected_class = options[selected]["class"]
                     player  = selected_class(400, 300)
+                    player.mobile_controls = mobile_controls
                     players = pygame.sprite.Group(player)
                     state   = "game"
         cx, cy = WIDTH // 2, HEIGHT // 2
@@ -366,6 +379,8 @@ def game_loop():
         # ================= EVENTS =================
         pressed_e = False
         for event in pygame.event.get():
+            mobile_controls.handle_event(event)
+
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
             if event.type == pygame.KEYDOWN:
@@ -375,6 +390,8 @@ def game_loop():
                     pressed_e = True
                 if event.key == pygame.K_y:
                     print(f"Player position: x={player.rect.centerx}, y={player.rect.centery}")
+
+        mobile_controls.update()
 
         # ================= UPDATE =================
         players.update()
@@ -538,6 +555,9 @@ def game_loop():
         draw_relic_notif()
 
         draw_timer_panel()
+
+        # Virtual joystick + attack/dash buttons (drawn last = on top)
+        mobile_controls.draw(screen)
 
         pygame.display.flip()
 

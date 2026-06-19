@@ -62,7 +62,7 @@ class BasePlayer(pygame.sprite.Sprite):
              use_spritesheet=False):
 
         super().__init__()
-
+        self.mobile_controls = None 
         self.scale = scale
         self.assets_folder = assets_folder
         
@@ -152,102 +152,110 @@ class BasePlayer(pygame.sprite.Sprite):
         # DAMAGE
         self.damage = 1
 
-
     def input(self):
-
         keys = pygame.key.get_pressed()
-
+        mc = self.mobile_controls   # bisa None kalau belum di-set
+ 
         dx = 0
         dy = 0
-
+ 
         moving = False
-
+ 
         # ATTACK
-        if keys[pygame.K_p] and not self.attacking and self.attack_timer == 0:
-
+        attack_pressed = keys[pygame.K_p] or (mc and mc.attack)
+ 
+        if attack_pressed and not self.attacking and self.attack_timer == 0:
+ 
             self.attacking = True
             self.state = "attack"
             self.frame_index = 0
-
-
+ 
+ 
         if self.attacking:
-
+ 
             self.anim_speed = 0.05
             return
-
+ 
         else:
-
+ 
             self.anim_speed = 5
-
-
+ 
+ 
         # DASH
-        if keys[pygame.K_LSHIFT] and not self.dashing and self.dash_timer == 0:
-
+        dash_pressed = keys[pygame.K_LSHIFT] or (mc and mc.dash)
+ 
+        if dash_pressed and not self.dashing and self.dash_timer == 0:
+ 
             self.dashing = True
             self.dash_timer = self.dash_duration
             self.state = "dash"
-
-
+ 
+ 
         if self.dashing:
-
+ 
             dx = self.facing * self.dash_speed
-
+ 
             self.dash_timer -= 1
-
+ 
             if self.dash_timer <= 0:
-
+ 
                 self.dashing = False
                 self.dash_timer = -self.dash_cooldown
-
-
+ 
+ 
         # MOVE
         if not self.dashing:
-
-            if keys[pygame.K_a]:
-
+ 
+            move_left  = keys[pygame.K_a] or (mc and mc.move_left)
+            move_right = keys[pygame.K_d] or (mc and mc.move_right)
+            move_up    = keys[pygame.K_w] or (mc and mc.move_up)
+            move_down  = keys[pygame.K_s] or (mc and mc.move_down)
+ 
+            if move_left:
+ 
                 dx = -self.speed
                 self.facing = -1
                 moving = True
-
-
-            if keys[pygame.K_d]:
-
+ 
+ 
+            if move_right:
+ 
                 dx = self.speed
                 self.facing = 1
                 moving = True
-
-
-            if keys[pygame.K_w]:
-
+ 
+ 
+            if move_up:
+ 
                 dy = -self.speed
                 moving = True
-
-
-            if keys[pygame.K_s]:
-
+ 
+ 
+            if move_down:
+ 
                 dy = self.speed
                 moving = True
-
-
+ 
+ 
             self.anim_speed = 0.3 if moving else 0.05
-
-
+ 
+ 
         self.rect.x += dx
         self.rect.y += dy
-
-
+ 
+ 
         if not self.dashing:
-
+ 
             self.state = "walk" if moving else "idle"
-
-
+ 
+ 
         if self.dash_timer < 0:
-
+ 
             self.dash_timer += 1
-
-
+ 
+ 
         if self.attack_timer > 0:
-
+ 
             self.attack_timer -= 1
 
 
