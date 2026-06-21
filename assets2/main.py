@@ -10,7 +10,7 @@ from player.arrow import Arrow
 from player.hammer import Hammer
 from enemy1 import Enemy
 from enemy2 import Enemy2
-from mobile_controls import MobileControls
+from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 
 pygame.init() 
 
@@ -337,6 +337,179 @@ def character_select():
         screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 1))
         pygame.display.flip()
 
+# ================= PAUSE MENU =================
+def pause_menu():
+    """Blocking loop — the game is fully frozen while this runs because
+    no update() calls happen here, only drawing the captured frozen frame.
+
+    Returns one of: 'resume' | 'select' | 'menu'
+
+    To replace placeholder buttons with your own assets later:
+    - Replace draw_pause_btn() with a blit of your own button sprite.
+    - The rect objects (resume_rect, select_rect, menu_rect) control hit areas
+      and stay the same regardless of how you draw the buttons.
+    - The frozen_frame capture and overlay fill stay the same.
+    """
+    # Capture the exact pixel state of the screen at the moment pause was pressed.
+    # This is blitted every frame of the pause loop so the game scene shows through.
+    frozen_frame = screen.copy()
+
+    # Semi-transparent dark overlay — change the 4th value (0-255) to adjust darkness.
+    # 160 ≈ 63% opacity, enough to darken without completely hiding the scene.
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+
+    # ---- Pause menu layout ----
+    btn_w, btn_h = 280, 60
+    btn_x  = WIDTH  // 2 - btn_w // 2
+    gap    = 80   # vertical distance between button centers
+    # Order: Resume (top) → Character Selection (middle) → Main Menu (bottom)
+    resume_rect = pygame.Rect(btn_x, HEIGHT // 2 - gap, btn_w, btn_h)
+    select_rect = pygame.Rect(btn_x, HEIGHT // 2,       btn_w, btn_h)
+    menu_rect   = pygame.Rect(btn_x, HEIGHT // 2 + gap, btn_w, btn_h)
+
+    # Placeholder fonts — replace with your game fonts or loaded assets later.
+    pause_title_font = pygame.font.SysFont("arial", 48, bold=True)
+    pause_btn_font   = pygame.font.SysFont("arial", 28, bold=True)
+
+    # Placeholder button colors
+    BTN_IDLE   = (80,  80,  80)
+    BTN_HOVER  = (130, 130, 130)
+    BTN_TEXT   = (240, 240, 240)
+    BTN_BORDER = (30,  30,  30)
+
+    def draw_pause_btn(rect, text, hovered):
+        """Placeholder button renderer.
+        To swap in your own asset: blit your button sprite at rect.topleft,
+        then blit the text label centered on rect. Remove this function when done."""
+        color = BTN_HOVER if hovered else BTN_IDLE
+        pygame.draw.rect(screen, BTN_BORDER, rect.inflate(4, 4), border_radius=8)
+        pygame.draw.rect(screen, color,      rect,               border_radius=7)
+        label = pause_btn_font.render(text, True, BTN_TEXT)
+        screen.blit(label, (rect.centerx - label.get_width()  // 2,
+                             rect.centery - label.get_height() // 2))
+
+    while True:
+        clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+
+        for event in pygame.event.get():
+            # Keep feeding events to mobile_controls so the pause button
+            # can be pressed again to resume, and touch_ids stay clean.
+            mobile_controls.handle_event(event)
+
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return "resume"
+
+            # Mouse click
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if resume_rect.collidepoint(mouse_pos):
+                    return "resume"
+                if select_rect.collidepoint(mouse_pos):
+                    return "select"
+                if menu_rect.collidepoint(mouse_pos):
+                    return "menu"
+
+            # Touch tap directly on pause menu buttons
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if resume_rect.collidepoint(tx, ty):
+                    return "resume"
+                if select_rect.collidepoint(tx, ty):
+                    return "select"
+                if menu_rect.collidepoint(tx, ty):
+                    return "menu"
+
+        # Pressing the pause button again resumes (one-shot flag consumed here)
+        if mobile_controls.pause_just_pressed:
+            mobile_controls.pause_just_pressed = False
+            return "resume"
+
+        # ---- Draw: frozen game → dark overlay → pause UI ----
+        screen.blit(frozen_frame, (0, 0))
+        screen.blit(overlay,      (0, 0))
+
+        title = pause_title_font.render("PAUSED", True, GOLD)
+        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 160))
+
+        draw_pause_btn(resume_rect, "Resume",              resume_rect.collidepoint(mouse_pos))
+        draw_pause_btn(select_rect, "Character Selection", select_rect.collidepoint(mouse_pos))
+        draw_pause_btn(menu_rect,   "Main Menu",           menu_rect.collidepoint(mouse_pos))
+
+        # Draw only the pause button itself — joystick/ATK/DASH are hidden
+        pause_spr = mobile_controls._btn_pause_active \
+                    if mobile_controls.btn_pause_pressed \
+                    else mobile_controls._btn_pause_idle
+        px, py = mobile_controls.btn_pause_center
+        screen.blit(pause_spr, (px - PAUSE_BTN_SIZE // 2, py - PAUSE_BTN_SIZE // 2))
+
+        pygame.display.flip()
+
+
+# ================= CHARACTER SELECT FROM PAUSE =================
+def character_select_from_pause():
+    """Like character_select() but returns the chosen class instead of
+    switching state directly — so game_loop stays in control of what happens next.
+    Returns None if the player presses ESC to go back to the pause menu."""
+    options = [
+        {"class": Archer,  "card": card_arjuna},
+        {"class": Spear,   "card": card_yudhistira},
+        {"class": Hammer,  "card": card_bima},
+        {"class": Assasin, "card": card_yudhistira},
+    ]
+    selected = 0
+    while True:
+        clock.tick(FPS)
+        screen.fill((20, 20, 20))
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RIGHT:
+                    selected = (selected + 1) % len(options)
+                if event.key == pygame.K_LEFT:
+                    selected = (selected - 1) % len(options)
+                if event.key == pygame.K_RETURN:
+                    return options[selected]["class"]
+                if event.key == pygame.K_ESCAPE:
+                    return None  # back to pause menu
+        cx, cy = WIDTH // 2, HEIGHT // 2
+        for i, char in enumerate(options):
+            offset = (i - selected) * 350
+            card   = char["card"]
+            card   = pygame.transform.scale(card, (340, 450) if i == selected else (280, 380))
+            screen.blit(card, card.get_rect(center=(cx + offset, cy)))
+        title = btn_font.render("SELECT CHARACTER", True, WHITE)
+        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 1))
+        hint = pixel_font.render("ESC — back to pause", True, (150, 150, 150))
+        screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 40))
+        pygame.display.flip()
+
+
+# ================= RESTART FROM PAUSE =================
+def restart_from_pause(new_player_class):
+    """Switches the player character without resetting the relic.
+    Resets enemies and phase timer, spawns player at the default position."""
+    global player, players, phase, phase_frames, bg_game, current_bg, enemy_respawn_timer
+    player = new_player_class(*SPAWN_POS)
+    player.mobile_controls = mobile_controls
+    players = pygame.sprite.Group(player)
+    # Reset to fight phase and map 1
+    phase        = "lobby"
+    phase_frames = LOBBY_DURATION * FPS
+    bg_game      = bg_map1
+    current_bg   = 1
+    # Reset enemies
+    enemies.empty()
+    enemies.add(Enemy(*enemy_spawn_pos))
+    enemy_respawn_timer = 0
+
+
 # ================= PHASE TRANSITION HELPERS =================
 def start_lobby():
     global phase, phase_frames, bg_game, current_bg
@@ -377,7 +550,8 @@ def game_loop():
                 start_lobby()
 
         # ================= EVENTS =================
-        pressed_e = False
+        pressed_e   = False
+        should_pause = False
         for event in pygame.event.get():
             mobile_controls.handle_event(event)
 
@@ -385,13 +559,30 @@ def game_loop():
                 pygame.quit(); sys.exit()
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    state = "menu"
+                    should_pause = True
                 if event.key == pygame.K_e:
                     pressed_e = True
                 if event.key == pygame.K_y:
                     print(f"Player position: x={player.rect.centerx}, y={player.rect.centery}")
 
         mobile_controls.update()
+
+        # Touch pause button check (one-shot flag set by mobile_controls)
+        if mobile_controls.pause_just_pressed:
+            mobile_controls.pause_just_pressed = False
+            should_pause = True
+
+        if should_pause:
+            result = pause_menu()
+            if result == "select":
+                chosen = character_select_from_pause()
+                if chosen is not None:
+                    restart_from_pause(chosen)
+                # chosen is None means player hit ESC — fall back into game_loop
+            elif result == "menu":
+                state = "menu"
+                return  # exits game_loop; outer while True picks up state == "menu"
+            # result == "resume": do nothing, game_loop continues normally
 
         # ================= UPDATE =================
         players.update()
@@ -556,8 +747,10 @@ def game_loop():
 
         draw_timer_panel()
 
-        # Virtual joystick + attack/dash buttons (drawn last = on top)
-        mobile_controls.draw(screen)
+        # Virtual joystick + attack/dash + pause button (drawn last = on top)
+        # show_pause=True makes all controls visible; they are hidden on other screens
+        # because draw() is not called at all in main_menu() or character_select().
+        mobile_controls.draw(screen, show_pause=True)
 
         pygame.display.flip()
 

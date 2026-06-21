@@ -20,6 +20,10 @@ BUTTON_GAP            = 108     # vertical gap between ATK/DASH buttons
 
 FONT_SIZE = 16
 
+# ---- Pause button (top-center, UI only — not gameplay input) ----
+PAUSE_BTN_SIZE   = 48   # width and height of the square button (px)
+PAUSE_BTN_MARGIN = 14   # distance from top edge
+
 # ---- Stone / bronze relic palette (matches GOLD/ORANGE/RED in main.py) ----
 STONE_DARK    = (46,  38,  30)     # deep basalt shadow
 STONE_MID     = (78,  64,  48)     # weathered stone body
@@ -142,6 +146,24 @@ def _build_button(radius, scale, label, font, pressed, mid_color, light_color, d
     return surf
 
 
+def _build_pause_button(size, pressed):
+    """Pre-render the pause button square — placeholder style (grey square, Arial 'P').
+    To replace with your own asset later: load your image with
+    pygame.image.load(...).convert_alpha(), scale to (size, size), and return it
+    instead of building this surface. Make a pressed variant by darkening with
+    surf.fill((0,0,0,60), special_flags=pygame.BLEND_RGBA_MULT)."""
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    body   = (180, 180, 180) if pressed else (100, 100, 100)
+    border = (40,  40,  40)
+    pygame.draw.rect(surf, border, (0, 0, size, size),             border_radius=6)
+    pygame.draw.rect(surf, body,   (2, 2, size - 4, size - 4),    border_radius=5)
+    font  = pygame.font.SysFont("arial", size // 2, bold=True)
+    label = font.render("P", True, (20, 20, 20))
+    surf.blit(label, (size // 2 - label.get_width()  // 2,
+                      size // 2 - label.get_height() // 2))
+    return surf
+
+
 class MobileControls:
     def __init__(self, width, height, font=None):
         self.width = width
@@ -203,6 +225,17 @@ class MobileControls:
             SKY_MID, SKY_LIGHT, SKY_DARK
         )
 
+        # ---- Pause button (UI only — not gameplay input) ----
+        # Positioned top-center. Only shown during gameplay via draw(show_pause=True).
+        self.btn_pause_center   = (width // 2, PAUSE_BTN_MARGIN + PAUSE_BTN_SIZE // 2)
+        self.btn_pause_pressed  = False
+        self.btn_pause_touch_id = None
+        # One-shot flag: set True when pressed, game_loop reads it then resets to False.
+        self.pause_just_pressed = False
+
+        self._btn_pause_idle    = _build_pause_button(PAUSE_BTN_SIZE, False)
+        self._btn_pause_active  = _build_pause_button(PAUSE_BTN_SIZE, True)
+
     # ---------------------------------------------------------------
     # EVENT HANDLING
     # ---------------------------------------------------------------
@@ -258,6 +291,13 @@ class MobileControls:
             self.dash = True
             return
 
+        if self._dist(pos, self.btn_pause_center) <= PAUSE_BTN_SIZE * 0.8 \
+                and self.btn_pause_touch_id is None:
+            self.btn_pause_touch_id = touch_id
+            self.btn_pause_pressed  = True
+            self.pause_just_pressed = True
+            return
+
     def _on_drag(self, pos, touch_id):
         if touch_id == self.joy_touch_id:
             self._update_joystick(pos)
@@ -279,6 +319,10 @@ class MobileControls:
             self.btn_dash_touch_id = None
             self.btn_dash_pressed = False
             self.dash = False
+
+        if touch_id == self.btn_pause_touch_id:
+            self.btn_pause_touch_id = None
+            self.btn_pause_pressed  = False
 
     # ---------------------------------------------------------------
     # JOYSTICK MATH
@@ -329,8 +373,20 @@ class MobileControls:
     # DRAWING — blits pre-rendered pixel-art sprites, no per-frame
     # circle math, so this is cheap even on low-end mobile hardware.
     # ---------------------------------------------------------------
-    def draw(self, surface):
+    def draw(self, surface, show_pause=False):
+        """Draw the mobile controls.
+
+        show_pause=True  → draw joystick + ATK + DASH + pause button (in-game HUD)
+        show_pause=False → draw nothing (main menu / character select screens)
+
+        To replace the pause button placeholder later: swap out self._btn_pause_idle
+        and self._btn_pause_active with your own pre-loaded/scaled pygame.Surface
+        objects in __init__, then _build_pause_button() is no longer called.
+        """
         if not self.visible:
+            return
+
+        if not show_pause:
             return
 
         # Joystick base (static)
@@ -353,6 +409,11 @@ class MobileControls:
         dxp, dyp = self.btn_dash_center
         surface.blit(dash, (dxp - dash.get_width() // 2, dyp - dash.get_height() // 2))
 
+        # Pause button (top-center)
+        pause_spr = self._btn_pause_active if self.btn_pause_pressed else self._btn_pause_idle
+        px, py = self.btn_pause_center
+        surface.blit(pause_spr, (px - PAUSE_BTN_SIZE // 2, py - PAUSE_BTN_SIZE // 2))
+
     # ---------------------------------------------------------------
     # RESIZE SUPPORT
     # ---------------------------------------------------------------
@@ -362,4 +423,5 @@ class MobileControls:
         self.joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
         self.joy_knob_pos = list(self.joy_center)
         self.btn_attack_center = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y - BUTTON_GAP)
-        self.btn_dash_center = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y)
+        self.btn_dash_center   = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y)
+        self.btn_pause_center  = (width // 2, PAUSE_BTN_MARGIN + PAUSE_BTN_SIZE // 2)
