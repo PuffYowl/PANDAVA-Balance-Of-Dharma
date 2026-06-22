@@ -11,7 +11,8 @@ from player.hammer import Hammer
 from enemy1 import Enemy
 from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
-
+from character_registry import broadcast_character
+from dialog_system import DialogBox, RESI_DIALOG_TREE
 pygame.init() 
 
 # ================= WINDOW =================
@@ -23,6 +24,7 @@ clock = pygame.time.Clock()
 # Virtual joystick + attack/dash buttons for mobile.
 # Set mobile_controls.visible = False to hide on desktop builds.
 mobile_controls = MobileControls(WIDTH, HEIGHT)
+dialog_box = DialogBox(WIDTH, HEIGHT)
 FPS = 60
 
 # ================= LOAD ASSETS =================
@@ -91,13 +93,14 @@ phase_frames  = LOBBY_DURATION * FPS
 
 # ================= STATE =================
 state          = "menu"
-selected_class = Assasin
+selected_class = Archer
 SPAWN_POS      = (400, 300)
 
 # ================= PLAYER =================
-player  = Assasin(400, 300)
+player  = Archer(400, 300)
 player.mobile_controls = mobile_controls
 players = pygame.sprite.Group(player)
+broadcast_character(player)
 
 # ================= ENEMIES =================
 enemy               = Enemy(100, 300)
@@ -326,6 +329,7 @@ def character_select():
                     player  = selected_class(400, 300)
                     player.mobile_controls = mobile_controls
                     players = pygame.sprite.Group(player)
+                    broadcast_character(player)
                     state   = "game"
         cx, cy = WIDTH // 2, HEIGHT // 2
         for i, char in enumerate(options):
@@ -404,6 +408,10 @@ def pause_menu():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return "resume"
+            
+            if dialog_box.active:
+                dialog_box.handle_event(event)
+                continue
 
             # Mouse click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -567,6 +575,22 @@ def game_loop():
 
         mobile_controls.update()
 
+        if dialog_box.active:
+            screen.blit(bg_game, (0, 0))
+            enemies.draw(screen)
+            for enemy in enemies:
+                enemy.draw_healthbar(screen)
+            draw_relic()
+            player.draw(screen)
+            player.draw_healthbar(screen)
+            arrows.draw(screen)
+            draw_relic_notif()
+            draw_timer_panel()
+            dialog_box.draw(screen)
+            mobile_controls.draw(screen)
+            pygame.display.flip()
+            continue 
+
         # Touch pause button check (one-shot flag set by mobile_controls)
         if mobile_controls.pause_just_pressed:
             mobile_controls.pause_just_pressed = False
@@ -674,10 +698,15 @@ def game_loop():
             if player.rect.colliderect(pickup_range):
                 near_relic = True
                 if pressed_e and not show_interact:
-                    relic["collected"] = True
-                    relic_notif_timer  = 180
-                    print(f"[RELIC] '{relic['name']}' berhasil diambil!")
-
+                    if relic["name"] == "Portal Resi":
+                        # Portal Resi: setiap tekan E buka dialog box, TIDAK di-collect
+                        dialog_box.open(RESI_DIALOG_TREE, start_key="start")
+                    else:
+                        # Relic biasa: tetap collect seperti semula
+                        relic["collected"] = True
+                        relic_notif_timer  = 180
+                        print(f"[RELIC] '{relic['name']}' berhasil diambil!")
+                        
         # Eksekusi pindah map
         if show_interact and pressed_e and portal_open:
             if pending_map == 2:
