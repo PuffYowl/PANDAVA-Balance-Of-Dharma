@@ -13,6 +13,7 @@ from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
 from dialog_system import DialogBox, RESI_DIALOG_TREE
+from player_hud import PlayerHUD, stamina_ratio_from_dash
 pygame.init() 
 
 # ================= WINDOW =================
@@ -25,6 +26,7 @@ clock = pygame.time.Clock()
 # Set mobile_controls.visible = False to hide on desktop builds.
 mobile_controls = MobileControls(WIDTH, HEIGHT)
 dialog_box = DialogBox(WIDTH, HEIGHT)
+player_hud = PlayerHUD()
 FPS = 60
 
 # ================= LOAD ASSETS =================
@@ -87,6 +89,10 @@ PURPLE = (180, 80,  255)
 LOBBY_DURATION   = 5
 EXPLORE_DURATION = 60
 
+PORTRAIT_PATHS = {
+    "Archer":  "assets2/portraits/archer_portrait.png"
+}
+
 # ================= PHASE STATE =================
 phase         = "lobby"
 phase_frames  = LOBBY_DURATION * FPS
@@ -96,11 +102,17 @@ state          = "menu"
 selected_class = Archer
 SPAWN_POS      = (400, 300)
 
+# Jumlah "air" yang ditampilkan di HUD kiri atas. Untuk saat ini selalu 0
+# sesuai permintaan — nanti tinggal update variabel ini begitu ada sistem
+# pickup/currency air yang sebenarnya.
+water_count = 0
+
 # ================= PLAYER =================
 player  = Archer(400, 300)
 player.mobile_controls = mobile_controls
 players = pygame.sprite.Group(player)
 broadcast_character(player)
+player_hud.set_character(player.__class__.__name__)
 
 # ================= ENEMIES =================
 enemy               = Enemy(100, 300)
@@ -151,17 +163,21 @@ RELIC_POSITIONS = {
 }
 
 # Pasangkan nama dengan image-nya
+# NOTE: "Portal Resi" sengaja TIDAK ada di sini lagi — dia sekarang punya
+# object & generator sendiri (lihat generate_portal_resi() di bawah) supaya
+# posisinya selalu di tengah map dan selalu muncul berbarengan dengan relic ini,
+# bukan jadi salah satu pilihan random dari relic biasa.
 RELIC_OPTIONS = [
     {"name": "Batu Arjuna",     "img": relic_arjuna},
     {"name": "Batu Bima",       "img": relic_bima},
     {"name": "Batu Yudhistira", "img": relic_yudhistira},
     {"name": "Batu Sadewa",     "img": relic_sadewa},
     {"name": "Batu Nakula",     "img": relic_nakula},
-    {"name": "Portal Resi",     "img": portal_resi},
 ]
 
 
 def generate_relic():
+    """Relic biasa (collectible). Map & posisi random, independen dari Portal Resi."""
     relic_map    = random.choice([3, 4, 5])
     relic_pos    = random.choice(RELIC_POSITIONS[relic_map])
     relic_option = random.choice(RELIC_OPTIONS)
@@ -175,10 +191,29 @@ def generate_relic():
     }
 
 
+def generate_portal_resi():
+    """
+    Portal Resi: selalu muncul berbarengan dengan relic biasa, di map random
+    [3, 4, 5], TAPI posisinya selalu di tengah-tengah map (WIDTH//2, HEIGHT//2)
+    — tidak ikut RELIC_POSITIONS sama sekali.
+    """
+    portal_map = random.choice([3, 4, 5])
+    portal_pos = (WIDTH // 2, HEIGHT // 2)
+    return {
+        "map":  portal_map,
+        "pos":  portal_pos,
+        "name": "Portal Resi",
+        "img":  portal_resi,
+        "rect": pygame.Rect(portal_pos[0] - 50, portal_pos[1] - 50, 100, 100),
+    }
+
+
 relic       = generate_relic()
+portal      = generate_portal_resi()
 relic_pulse = 0
 relic_notif_timer = 0
 print(f"[RELIC] '{relic['name']}' muncul di Map {relic['map']} posisi {relic['pos']}")
+print(f"[PORTAL] '{portal['name']}' muncul di Map {portal['map']} posisi {portal['pos']}")
 
 # ================= RELIC DRAW =================
 def draw_relic():
@@ -204,6 +239,29 @@ def draw_relic_prompt():
         screen.blit(label, (
             relic["pos"][0] - label.get_width() // 2,
             relic["pos"][1] - 70
+        ))
+        return True
+    return False
+
+# ================= PORTAL RESI DRAW =================
+# Terpisah dari relic biasa karena Portal Resi tidak pernah "collected"
+# (lihat dialog_box.open() di RELIC PICKUP) dan posisinya selalu di tengah map.
+def draw_portal():
+    if portal["map"] != current_bg:
+        return
+    x, y = portal["pos"]
+    screen.blit(portal["img"], portal["img"].get_rect(center=(x, y)))
+
+def draw_portal_prompt():
+    """Tampilkan 'Press E' di atas Portal Resi jika player dekat."""
+    if portal["map"] != current_bg:
+        return False
+    pickup_range = pygame.Rect(portal["pos"][0] - 60, portal["pos"][1] - 60, 120, 120)
+    if player.rect.colliderect(pickup_range):
+        label = small_font.render(f"Press E — {portal['name']}", True, GOLD)
+        screen.blit(label, (
+            portal["pos"][0] - label.get_width() // 2,
+            portal["pos"][1] - 70
         ))
         return True
     return False
@@ -330,6 +388,7 @@ def character_select():
                     player.mobile_controls = mobile_controls
                     players = pygame.sprite.Group(player)
                     broadcast_character(player)
+                    player_hud.set_character(player.__class__.__name__)
                     state   = "game"
         cx, cy = WIDTH // 2, HEIGHT // 2
         for i, char in enumerate(options):
@@ -346,12 +405,12 @@ def pause_menu():
     """Blocking loop — the game is fully frozen while this runs because
     no update() calls happen here, only drawing the captured frozen frame.
 
-    Returns one of: 'resume' | 'select' | 'menu'
+    Returns one of: 'resume' | 'select' | 'settings' | 'menu'
 
     To replace placeholder buttons with your own assets later:
     - Replace draw_pause_btn() with a blit of your own button sprite.
-    - The rect objects (resume_rect, select_rect, menu_rect) control hit areas
-      and stay the same regardless of how you draw the buttons.
+    - The rect objects (resume_rect, select_rect, settings_rect, menu_rect)
+      control hit areas and stay the same regardless of how you draw the buttons.
     - The frozen_frame capture and overlay fill stay the same.
     """
     # Capture the exact pixel state of the screen at the moment pause was pressed.
@@ -366,15 +425,16 @@ def pause_menu():
     # ---- Pause menu layout ----
     btn_w, btn_h = 280, 60
     btn_x  = WIDTH  // 2 - btn_w // 2
-    gap    = 80   # vertical distance between button centers
-    # Order: Resume (top) → Character Selection (middle) → Main Menu (bottom)
-    resume_rect = pygame.Rect(btn_x, HEIGHT // 2 - gap, btn_w, btn_h)
-    select_rect = pygame.Rect(btn_x, HEIGHT // 2,       btn_w, btn_h)
-    menu_rect   = pygame.Rect(btn_x, HEIGHT // 2 + gap, btn_w, btn_h)
+    gap    = 76   # vertical distance between button centers
+    # Order: Resume → Character Selection → Settings → Main Menu
+    resume_rect   = pygame.Rect(btn_x, HEIGHT // 2 - gap * 1.5, btn_w, btn_h)
+    select_rect   = pygame.Rect(btn_x, HEIGHT // 2 - gap * 0.5, btn_w, btn_h)
+    settings_rect = pygame.Rect(btn_x, HEIGHT // 2 + gap * 0.5, btn_w, btn_h)
+    menu_rect     = pygame.Rect(btn_x, HEIGHT // 2 + gap * 1.5, btn_w, btn_h)
 
     # Placeholder fonts — replace with your game fonts or loaded assets later.
     pause_title_font = pygame.font.SysFont("arial", 48, bold=True)
-    pause_btn_font   = pygame.font.SysFont("arial", 28, bold=True)
+    pause_btn_font   = pygame.font.SysFont("arial", 26, bold=True)
 
     # Placeholder button colors
     BTN_IDLE   = (80,  80,  80)
@@ -408,10 +468,6 @@ def pause_menu():
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return "resume"
-            
-            if dialog_box.active:
-                dialog_box.handle_event(event)
-                continue
 
             # Mouse click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -419,6 +475,8 @@ def pause_menu():
                     return "resume"
                 if select_rect.collidepoint(mouse_pos):
                     return "select"
+                if settings_rect.collidepoint(mouse_pos):
+                    return "settings"
                 if menu_rect.collidepoint(mouse_pos):
                     return "menu"
 
@@ -430,6 +488,8 @@ def pause_menu():
                     return "resume"
                 if select_rect.collidepoint(tx, ty):
                     return "select"
+                if settings_rect.collidepoint(tx, ty):
+                    return "settings"
                 if menu_rect.collidepoint(tx, ty):
                     return "menu"
 
@@ -445,9 +505,10 @@ def pause_menu():
         title = pause_title_font.render("PAUSED", True, GOLD)
         screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - 160))
 
-        draw_pause_btn(resume_rect, "Resume",              resume_rect.collidepoint(mouse_pos))
-        draw_pause_btn(select_rect, "Character Selection", select_rect.collidepoint(mouse_pos))
-        draw_pause_btn(menu_rect,   "Main Menu",           menu_rect.collidepoint(mouse_pos))
+        draw_pause_btn(resume_rect,   "Resume",              resume_rect.collidepoint(mouse_pos))
+        draw_pause_btn(select_rect,   "Character Selection", select_rect.collidepoint(mouse_pos))
+        draw_pause_btn(settings_rect, "Settings",             settings_rect.collidepoint(mouse_pos))
+        draw_pause_btn(menu_rect,     "Main Menu",           menu_rect.collidepoint(mouse_pos))
 
         # Draw only the pause button itself — joystick/ATK/DASH are hidden
         pause_spr = mobile_controls._btn_pause_active \
@@ -455,6 +516,126 @@ def pause_menu():
                     else mobile_controls._btn_pause_idle
         px, py = mobile_controls.btn_pause_center
         screen.blit(pause_spr, (px - PAUSE_BTN_SIZE // 2, py - PAUSE_BTN_SIZE // 2))
+
+        pygame.display.flip()
+
+
+# ================= SETTINGS MENU (from pause) =================
+def settings_menu():
+    """
+    Lets the player drag the joystick / ATK / DASH buttons anywhere they like,
+    then Save or Reset the layout. The pause button is intentionally NOT
+    repositionable here — it always stays fixed top-center.
+
+    Returns to the pause menu when the player presses Back/ESC.
+    Saving persists to assets2/controls_layout.json via mobile_controls.save_layout(),
+    so the custom layout is automatically reloaded next time the game starts
+    (MobileControls.__init__ calls load_layout() already).
+    """
+    title_font  = pygame.font.SysFont("arial", 40, bold=True)
+    btn_font    = pygame.font.SysFont("arial", 24, bold=True)
+    hint_font   = pygame.font.SysFont("arial", 18)
+
+    btn_w, btn_h = 170, 50
+    gap = 16
+    total_w = btn_w * 3 + gap * 2
+    start_x = WIDTH // 2 - total_w // 2
+    btn_y   = 20
+
+    save_rect  = pygame.Rect(start_x,                      btn_y, btn_w, btn_h)
+    reset_rect = pygame.Rect(start_x + (btn_w + gap),       btn_y, btn_w, btn_h)
+    back_rect  = pygame.Rect(start_x + (btn_w + gap) * 2,   btn_y, btn_w, btn_h)
+
+    BTN_IDLE   = (80,  80,  80)
+    BTN_HOVER  = (130, 130, 130)
+    BTN_TEXT   = (240, 240, 240)
+    BTN_BORDER = (30,  30,  30)
+
+    def draw_btn(rect, text, hovered):
+        color = BTN_HOVER if hovered else BTN_IDLE
+        pygame.draw.rect(screen, BTN_BORDER, rect.inflate(4, 4), border_radius=8)
+        pygame.draw.rect(screen, color,      rect,               border_radius=7)
+        label = btn_font.render(text, True, BTN_TEXT)
+        screen.blit(label, (rect.centerx - label.get_width()  // 2,
+                             rect.centery - label.get_height() // 2))
+
+    # Snapshot so "Back" without saving can restore the layout exactly as it
+    # was before the player started dragging things around.
+    layout_before_editing = mobile_controls.get_layout_dict()
+
+    mobile_controls.start_edit_mode()
+
+    save_flash_timer = 0  # frames remaining to show "Saved!" feedback text
+
+    while True:
+        clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                mobile_controls.apply_layout_dict(layout_before_editing)
+                mobile_controls.stop_edit_mode()
+                return
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if save_rect.collidepoint(mouse_pos):
+                    mobile_controls.save_layout()
+                    save_flash_timer = FPS * 2  # show "Saved!" for ~2 seconds
+                    continue
+                if reset_rect.collidepoint(mouse_pos):
+                    mobile_controls.reset_layout()
+                    continue
+                if back_rect.collidepoint(mouse_pos):
+                    mobile_controls.apply_layout_dict(layout_before_editing)
+                    mobile_controls.stop_edit_mode()
+                    return
+
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if save_rect.collidepoint(tx, ty):
+                    mobile_controls.save_layout()
+                    save_flash_timer = FPS * 2
+                    continue
+                if reset_rect.collidepoint(tx, ty):
+                    mobile_controls.reset_layout()
+                    continue
+                if back_rect.collidepoint(tx, ty):
+                    mobile_controls.apply_layout_dict(layout_before_editing)
+                    mobile_controls.stop_edit_mode()
+                    return
+
+            # Everything else (drags on the joystick/ATK/DASH halos) goes to
+            # mobile_controls' edit-mode handler.
+            mobile_controls.handle_event(event)
+
+        # ---- Draw ----
+        screen.fill((25, 25, 30))
+
+        title = title_font.render("Controls Settings", True, GOLD)
+        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 78))
+
+        hint = hint_font.render(
+            "Drag the joystick / ATK / DASH to reposition them.",
+            True, (190, 190, 190)
+        )
+        screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, 118))
+
+        draw_btn(save_rect,  "Save",            save_rect.collidepoint(mouse_pos))
+        draw_btn(reset_rect, "Reset Default",   reset_rect.collidepoint(mouse_pos))
+        draw_btn(back_rect,  "Back",            back_rect.collidepoint(mouse_pos))
+
+        # Draw the controls themselves (with edit-mode halos/labels)
+        mobile_controls.draw(screen, show_pause=True)
+
+        if save_flash_timer > 0:
+            saved_label = btn_font.render("Saved!", True, GREEN)
+            screen.blit(saved_label, (save_rect.centerx - saved_label.get_width() // 2,
+                                       save_rect.bottom + 6))
+            save_flash_timer -= 1
 
         pygame.display.flip()
 
@@ -507,6 +688,8 @@ def restart_from_pause(new_player_class):
     player = new_player_class(*SPAWN_POS)
     player.mobile_controls = mobile_controls
     players = pygame.sprite.Group(player)
+    broadcast_character(player)
+    player_hud.set_character(player.__class__.__name__)
     # Reset to fight phase and map 1
     phase        = "lobby"
     phase_frames = LOBBY_DURATION * FPS
@@ -544,27 +727,40 @@ def game_loop():
     global arrows, bg_game, current_bg
     global phase, phase_frames
     global relic_notif_timer
+    global water_count
 
     while state == "game":
         clock.tick(FPS)
 
         # ================= TICK PHASE TIMER =================
-        if phase_frames > 0:
-            phase_frames -= 1
-        else:
-            if phase == "lobby":
-                start_explore()
+        # Dialog yang aktif membekukan timer fase juga, supaya waktu lobby/explore
+        # tidak terus berkurang selama player sedang baca dialog.
+        if not dialog_box.active:
+            if phase_frames > 0:
+                phase_frames -= 1
             else:
-                start_lobby()
+                if phase == "lobby":
+                    start_explore()
+                else:
+                    start_lobby()
 
         # ================= EVENTS =================
-        pressed_e   = False
+        pressed_e    = False
         should_pause = False
         for event in pygame.event.get():
-            mobile_controls.handle_event(event)
-
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
+
+            # PRIORITAS UTAMA: kalau dialog box aktif, dia yang menyerap
+            # event ini duluan (UP/DOWN navigasi opsi, E/Enter konfirmasi, ESC tutup).
+            # Tanpa blok ini, dialog_box.handle_event() TIDAK PERNAH terpanggil
+            # di dalam game_loop, makanya dialog kelihatan "tidak bisa diapa-apain".
+            if dialog_box.active:
+                dialog_box.handle_event(event)
+                continue
+
+            mobile_controls.handle_event(event)
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     should_pause = True
@@ -581,13 +777,19 @@ def game_loop():
             for enemy in enemies:
                 enemy.draw_healthbar(screen)
             draw_relic()
+            draw_portal()
             player.draw(screen)
             player.draw_healthbar(screen)
             arrows.draw(screen)
             draw_relic_notif()
             draw_timer_panel()
+            player_hud.draw(screen, player.health, player.max_health,
+                             stamina_ratio_from_dash(player), water_count)
             dialog_box.draw(screen)
-            mobile_controls.draw(screen)
+            # NOTE: mobile_controls.draw() intentionally NOT called here —
+            # joystick/ATK/DASH/pause are hidden while a dialog is open so
+            # they don't visually clutter or get accidentally pressed
+            # underneath the dialog box.
             pygame.display.flip()
             continue 
 
@@ -598,6 +800,11 @@ def game_loop():
 
         if should_pause:
             result = pause_menu()
+            # Loop here so "Back" from Settings returns to the pause menu
+            # instead of immediately resuming gameplay.
+            while result == "settings":
+                settings_menu()
+                result = pause_menu()
             if result == "select":
                 chosen = character_select_from_pause()
                 if chosen is not None:
@@ -698,15 +905,21 @@ def game_loop():
             if player.rect.colliderect(pickup_range):
                 near_relic = True
                 if pressed_e and not show_interact:
-                    if relic["name"] == "Portal Resi":
-                        # Portal Resi: setiap tekan E buka dialog box, TIDAK di-collect
-                        dialog_box.open(RESI_DIALOG_TREE, start_key="start")
-                    else:
-                        # Relic biasa: tetap collect seperti semula
-                        relic["collected"] = True
-                        relic_notif_timer  = 180
-                        print(f"[RELIC] '{relic['name']}' berhasil diambil!")
-                        
+                    relic["collected"] = True
+                    relic_notif_timer  = 180
+                    print(f"[RELIC] '{relic['name']}' berhasil diambil!")
+
+        # ================= PORTAL RESI INTERACTION =================
+        # Terpisah dari relic biasa: tidak pernah "collected", jadi bisa
+        # ditekan E berkali-kali untuk membuka dialog box lagi.
+        near_portal = False
+        if portal["map"] == current_bg:
+            portal_pickup_range = pygame.Rect(portal["pos"][0] - 60, portal["pos"][1] - 60, 120, 120)
+            if player.rect.colliderect(portal_pickup_range):
+                near_portal = True
+                if pressed_e and not show_interact:
+                    dialog_box.open(RESI_DIALOG_TREE, start_key="start")
+
         # Eksekusi pindah map
         if show_interact and pressed_e and portal_open:
             if pending_map == 2:
@@ -750,15 +963,16 @@ def game_loop():
         for enemy in enemies:
             enemy.draw_healthbar(screen)
 
-        # ← RELIC DIGAMBAR DI SINI
+        # ← RELIC & PORTAL RESI DIGAMBAR DI SINI
         draw_relic()
+        draw_portal()
 
         player.draw(screen)
         player.draw_healthbar(screen)
 
         arrows.draw(screen)
 
-        # Portal prompt
+        # Portal map-transition prompt (gerbang pindah map, BUKAN Portal Resi)
         if show_interact:
             if portal_open:
                 msg = pixel_font.render("Press E", True, WHITE)
@@ -767,14 +981,21 @@ def game_loop():
             screen.blit(msg, (player.rect.centerx - msg.get_width() // 2,
                                player.rect.top - 44))
 
-        # Relic prompt (hanya jika tidak overlap dengan portal)
+        # Relic prompt (hanya jika tidak overlap dengan gerbang pindah map)
         if near_relic and not show_interact:
             draw_relic_prompt()
+
+        # Portal Resi prompt (hanya jika tidak overlap dengan gerbang pindah map)
+        if near_portal and not show_interact:
+            draw_portal_prompt()
 
         # Notifikasi pickup
         draw_relic_notif()
 
         draw_timer_panel()
+
+        player_hud.draw(screen, player.health, player.max_health,
+                         stamina_ratio_from_dash(player), water_count)
 
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens

@@ -1,5 +1,7 @@
 import pygame
 import math
+import json
+import os
 
 
 # ===================================================================
@@ -24,6 +26,11 @@ FONT_SIZE = 16
 PAUSE_BTN_SIZE   = 48   # width and height of the square button (px)
 PAUSE_BTN_MARGIN = 14   # distance from top edge
 
+# ---- Layout persistence ----
+# Stores only joystick / attack / dash centers (NOT the pause button —
+# that one stays fixed top-center by design).
+LAYOUT_FILE = "assets2/controls_layout.json"
+
 # ---- Stone / bronze relic palette (matches GOLD/ORANGE/RED in main.py) ----
 STONE_DARK    = (46,  38,  30)     # deep basalt shadow
 STONE_MID     = (78,  64,  48)     # weathered stone body
@@ -44,6 +51,11 @@ SKY_LIGHT   = (140, 200, 255)
 
 TEXT_COLOR  = (245, 230, 195)
 TEXT_SHADOW = (30,  22,  16)
+
+# ---- Edit-mode visuals (used only while repositioning in settings menu) ----
+EDIT_HALO_COLOR   = (255, 255, 255, 60)
+EDIT_LABEL_COLOR  = (255, 255, 255)
+EDIT_DRAG_COLOR   = (255, 220, 100)
 
 
 def _px_circle(surf, color, cx, cy, r, scale):
@@ -173,21 +185,26 @@ class MobileControls:
 
         self.font = font or pygame.font.SysFont("monospace", FONT_SIZE, bold=True)
 
+        # ---- Default geometry (used as fallback / "Reset to default") ----
+        self._default_joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
+        self._default_btn_attack_center = (
+            width - BUTTON_MARGIN_X,
+            height - BUTTON_MARGIN_Y - BUTTON_GAP
+        )
+        self._default_btn_dash_center = (
+            width - BUTTON_MARGIN_X,
+            height - BUTTON_MARGIN_Y
+        )
+
         # ---- Joystick geometry ----
-        self.joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
+        self.joy_center = self._default_joy_center
         self.joy_knob_pos = list(self.joy_center)
         self.joy_touch_id = None
         self.joy_active = False
 
         # ---- Buttons geometry ----
-        self.btn_attack_center = (
-            width - BUTTON_MARGIN_X,
-            height - BUTTON_MARGIN_Y - BUTTON_GAP
-        )
-        self.btn_dash_center = (
-            width - BUTTON_MARGIN_X,
-            height - BUTTON_MARGIN_Y
-        )
+        self.btn_attack_center = self._default_btn_attack_center
+        self.btn_dash_center = self._default_btn_dash_center
         self.btn_attack_pressed = False
         self.btn_dash_pressed = False
         self.btn_attack_touch_id = None
@@ -227,6 +244,8 @@ class MobileControls:
 
         # ---- Pause button (UI only — not gameplay input) ----
         # Positioned top-center. Only shown during gameplay via draw(show_pause=True).
+        # NOTE: the pause button is intentionally NOT part of the repositionable
+        # layout — it always stays fixed top-center.
         self.btn_pause_center   = (width // 2, PAUSE_BTN_MARGIN + PAUSE_BTN_SIZE // 2)
         self.btn_pause_pressed  = False
         self.btn_pause_touch_id = None
@@ -236,12 +255,27 @@ class MobileControls:
         self._btn_pause_idle    = _build_pause_button(PAUSE_BTN_SIZE, False)
         self._btn_pause_active  = _build_pause_button(PAUSE_BTN_SIZE, True)
 
+        # ---- Edit mode (used by the in-pause Settings screen) ----
+        # When edit_mode is True, handle_event() routes drags to repositioning
+        # the joystick/ATK/DASH centers instead of normal gameplay input.
+        self.edit_mode = False
+        self._edit_drag_target = None   # one of: "joy", "attack", "dash", or None
+        self._edit_drag_touch_id = None
+
+        # Try to load a previously saved layout (falls back to defaults silently
+        # if the file doesn't exist or is malformed).
+        self.load_layout()
+
     # ---------------------------------------------------------------
     # EVENT HANDLING
     # ---------------------------------------------------------------
     def handle_event(self, event):
         """Call this for every event in your pygame.event.get() loop."""
         if not self.visible:
+            return
+
+        if self.edit_mode:
+            self._handle_edit_event(event)
             return
 
         if event.type == pygame.FINGERDOWN:
@@ -389,12 +423,27 @@ class MobileControls:
         if not show_pause:
             return
 
+        self._draw_controls(surface)
+
+        # Pause button (top-center) — not drawn while in edit mode, since the
+        # settings screen has its own Save/Reset/Back buttons and the pause
+        # button isn't repositionable anyway.
+        if not self.edit_mode:
+            pause_spr = self._btn_pause_active if self.btn_pause_pressed else self._btn_pause_idle
+            px, py = self.btn_pause_center
+            surface.blit(pause_spr, (px - PAUSE_BTN_SIZE // 2, py - PAUSE_BTN_SIZE // 2))
+
+        if self.edit_mode:
+            self._draw_edit_overlay(surface)
+
+    def _draw_controls(self, surface):
+        """Draws joystick + ATK + DASH only (shared by normal draw() and edit mode)."""
         # Joystick base (static)
         base = self._joy_base_sprite
         surface.blit(base, (self.joy_center[0] - base.get_width() // 2,
                              self.joy_center[1] - base.get_height() // 2))
 
-        # Joystick knob (follows finger)
+        # Joystick knob (follows finger, or just sits centered in edit mode)
         knob = self._joy_knob_sprite_active if self.joy_active else self._joy_knob_sprite_idle
         kx, ky = self.joy_knob_pos
         surface.blit(knob, (kx - knob.get_width() // 2, ky - knob.get_height() // 2))
@@ -409,19 +458,178 @@ class MobileControls:
         dxp, dyp = self.btn_dash_center
         surface.blit(dash, (dxp - dash.get_width() // 2, dyp - dash.get_height() // 2))
 
-        # Pause button (top-center)
-        pause_spr = self._btn_pause_active if self.btn_pause_pressed else self._btn_pause_idle
-        px, py = self.btn_pause_center
-        surface.blit(pause_spr, (px - PAUSE_BTN_SIZE // 2, py - PAUSE_BTN_SIZE // 2))
-
     # ---------------------------------------------------------------
     # RESIZE SUPPORT
     # ---------------------------------------------------------------
     def resize(self, width, height):
         self.width = width
         self.height = height
-        self.joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
-        self.joy_knob_pos = list(self.joy_center)
-        self.btn_attack_center = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y - BUTTON_GAP)
-        self.btn_dash_center   = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y)
+        self._default_joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
+        self._default_btn_attack_center = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y - BUTTON_GAP)
+        self._default_btn_dash_center   = (width - BUTTON_MARGIN_X, height - BUTTON_MARGIN_Y)
         self.btn_pause_center  = (width // 2, PAUSE_BTN_MARGIN + PAUSE_BTN_SIZE // 2)
+        # Note: joy_center / btn_attack_center / btn_dash_center are NOT reset here
+        # on purpose — a saved custom layout should survive a resize. If you want
+        # custom layouts to also rescale proportionally on resize, that logic would
+        # go here instead.
+
+    # =================================================================
+    # EDIT MODE — drag-to-reposition joystick / ATK / DASH.
+    # Used by the Settings screen opened from the pause menu.
+    # =================================================================
+    def start_edit_mode(self):
+        """Enter edit mode: dragging the controls moves them instead of
+        triggering gameplay input. Call this when opening the settings screen."""
+        self.edit_mode = True
+        self._edit_drag_target = None
+        self._edit_drag_touch_id = None
+        # Reset any stuck gameplay input state so nothing keeps "firing"
+        # while the player is busy repositioning controls.
+        self.joy_touch_id = None
+        self.joy_active = False
+        self.joy_knob_pos = list(self.joy_center)
+        self.joy_vec = (0.0, 0.0)
+        self.move_up = self.move_down = self.move_left = self.move_right = False
+        self.btn_attack_touch_id = None
+        self.btn_attack_pressed = False
+        self.attack = False
+        self.btn_dash_touch_id = None
+        self.btn_dash_pressed = False
+        self.dash = False
+
+    def stop_edit_mode(self):
+        """Leave edit mode and return to normal gameplay input handling."""
+        self.edit_mode = False
+        self._edit_drag_target = None
+        self._edit_drag_touch_id = None
+
+    def _handle_edit_event(self, event):
+        if event.type == pygame.FINGERDOWN:
+            pos = self._finger_to_px(event)
+            self._edit_press(pos, event.finger_id)
+        elif event.type == pygame.FINGERMOTION:
+            pos = self._finger_to_px(event)
+            self._edit_drag(pos, event.finger_id)
+        elif event.type == pygame.FINGERUP:
+            self._edit_release(event.finger_id)
+
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self._edit_press(event.pos, "mouse")
+        elif event.type == pygame.MOUSEMOTION:
+            if self._edit_drag_touch_id == "mouse":
+                self._edit_drag(event.pos, "mouse")
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._edit_release("mouse")
+
+    def _edit_press(self, pos, touch_id):
+        if self._edit_drag_target is not None:
+            return  # already dragging something with another touch
+        if self._dist(pos, self.joy_center) <= JOYSTICK_RADIUS_OUTER * 1.4:
+            self._edit_drag_target = "joy"
+        elif self._dist(pos, self.btn_attack_center) <= BUTTON_RADIUS * 1.3:
+            self._edit_drag_target = "attack"
+        elif self._dist(pos, self.btn_dash_center) <= BUTTON_RADIUS * 1.3:
+            self._edit_drag_target = "dash"
+        else:
+            return
+        self._edit_drag_touch_id = touch_id
+
+    def _edit_drag(self, pos, touch_id):
+        if touch_id != self._edit_drag_touch_id or self._edit_drag_target is None:
+            return
+        # Clamp so controls can't be dragged fully off-screen.
+        x = max(20, min(self.width - 20, pos[0]))
+        y = max(20, min(self.height - 20, pos[1]))
+        if self._edit_drag_target == "joy":
+            self.joy_center = (x, y)
+            self.joy_knob_pos = [x, y]
+        elif self._edit_drag_target == "attack":
+            self.btn_attack_center = (x, y)
+        elif self._edit_drag_target == "dash":
+            self.btn_dash_center = (x, y)
+
+    def _edit_release(self, touch_id):
+        if touch_id == self._edit_drag_touch_id:
+            self._edit_drag_target = None
+            self._edit_drag_touch_id = None
+
+    def _draw_edit_overlay(self, surface):
+        """Subtle highlight rings + labels under each draggable control so it's
+        obvious in the settings screen that they can be picked up and moved."""
+        font = pygame.font.SysFont("arial", 16, bold=True)
+        targets = [
+            (self.joy_center, JOYSTICK_RADIUS_OUTER + 14, "Joystick"),
+            (self.btn_attack_center, BUTTON_RADIUS + 14, "Attack"),
+            (self.btn_dash_center, BUTTON_RADIUS + 14, "Dash"),
+        ]
+        for center, radius, label in targets:
+            halo = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+            pygame.draw.circle(halo, EDIT_HALO_COLOR, (radius, radius), radius)
+            pygame.draw.circle(halo, (255, 255, 255, 140), (radius, radius), radius, width=2)
+            surface.blit(halo, (center[0] - radius, center[1] - radius))
+
+            text = font.render(label, True, EDIT_LABEL_COLOR)
+            surface.blit(text, (center[0] - text.get_width() // 2, center[1] - radius - 20))
+
+    # =================================================================
+    # LAYOUT PERSISTENCE — save/load joystick + ATK + DASH positions
+    # as fractions of screen width/height, so a saved layout still makes
+    # sense if the window is resized later.
+    # =================================================================
+    def get_layout_dict(self):
+        """Returns the current joystick/ATK/DASH centers as fractions (0..1)
+        of the current screen size, so the layout is resolution-independent."""
+        return {
+            "joy_center":        [self.joy_center[0] / self.width, self.joy_center[1] / self.height],
+            "btn_attack_center": [self.btn_attack_center[0] / self.width, self.btn_attack_center[1] / self.height],
+            "btn_dash_center":   [self.btn_dash_center[0] / self.width, self.btn_dash_center[1] / self.height],
+        }
+
+    def apply_layout_dict(self, data):
+        """Applies a layout dict (fractions of screen size) produced by
+        get_layout_dict(). Silently ignores missing/malformed keys."""
+        try:
+            if "joy_center" in data:
+                fx, fy = data["joy_center"]
+                self.joy_center = (fx * self.width, fy * self.height)
+                self.joy_knob_pos = list(self.joy_center)
+            if "btn_attack_center" in data:
+                fx, fy = data["btn_attack_center"]
+                self.btn_attack_center = (fx * self.width, fy * self.height)
+            if "btn_dash_center" in data:
+                fx, fy = data["btn_dash_center"]
+                self.btn_dash_center = (fx * self.width, fy * self.height)
+        except (TypeError, ValueError, KeyError):
+            pass  # malformed file — keep whatever was already set
+
+    def save_layout(self, path=LAYOUT_FILE):
+        """Writes the current layout to a JSON file. Returns True on success."""
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(self.get_layout_dict(), f, indent=2)
+            return True
+        except OSError:
+            return False
+
+    def load_layout(self, path=LAYOUT_FILE):
+        """Loads a previously saved layout from JSON, if it exists.
+        Returns True if a layout was loaded, False if defaults are kept
+        (file missing or unreadable — never raises)."""
+        if not os.path.isfile(path):
+            return False
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            self.apply_layout_dict(data)
+            return True
+        except (OSError, json.JSONDecodeError):
+            return False
+
+    def reset_layout(self):
+        """Resets joystick/ATK/DASH to their built-in default positions
+        (does NOT save automatically — call save_layout() after if desired)."""
+        self.joy_center = self._default_joy_center
+        self.joy_knob_pos = list(self.joy_center)
+        self.btn_attack_center = self._default_btn_attack_center
+        self.btn_dash_center = self._default_btn_dash_center
