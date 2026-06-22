@@ -36,7 +36,7 @@ def load_spritesheet_row(path, frame_count, scale=1):
     return frames
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y, assets_folder='assets2/enemy'):
+    def __init__(self, x, y, assets_folder='assets2/enemy1'):
         super().__init__()
 
 

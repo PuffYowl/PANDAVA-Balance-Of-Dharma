@@ -131,6 +131,7 @@ class BasePlayer(pygame.sprite.Sprite):
 
         # MOVEMENT
         self.speed = 5
+        self.speed_diagonal = 1
         self.dash_speed = 25
         self.facing = 1
 
@@ -235,8 +236,27 @@ class BasePlayer(pygame.sprite.Sprite):
  
                 dy = self.speed
                 moving = True
- 
- 
+
+            if move_up and move_right:
+                dx = self.speed
+                dy = -self.speed_diagonal
+                moving = True
+
+            if move_up and move_left:
+                dx = -self.speed
+                dy = -self.speed_diagonal
+                moving = True
+
+            if move_down and move_right:
+                dx = self.speed
+                dy = self.speed_diagonal
+                moving = True
+
+            if move_down and move_left:
+                dx = -self.speed
+                dy = self.speed_diagonal
+                moving = True
+
             self.anim_speed = 0.3 if moving else 0.05
  
  
