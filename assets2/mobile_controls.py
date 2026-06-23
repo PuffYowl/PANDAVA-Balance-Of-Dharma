@@ -214,6 +214,17 @@ class MobileControls:
             height - BUTTON_MARGIN_Y
         )
 
+        # ---- Default geometry (used as fallback / "Reset to default") ----
+        self._default_joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
+        self._default_btn_attack_center = (
+            width - BUTTON_MARGIN_X,
+            height - BUTTON_MARGIN_Y - BUTTON_GAP
+        )
+        self._default_btn_dash_center = (
+            width - BUTTON_MARGIN_X,
+            height - BUTTON_MARGIN_Y
+        )
+
         # ---- Joystick geometry ----
         self.joy_center = self._default_joy_center
         self.joy_knob_pos = list(self.joy_center)

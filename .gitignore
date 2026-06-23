@@ -222,3 +222,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Mobile Controls Layout
+assets2/controls_layout.json
