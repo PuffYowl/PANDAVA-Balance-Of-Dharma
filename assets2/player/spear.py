@@ -23,7 +23,7 @@ class Spear(BasePlayer):
         )
 
         # ================= STATS =================
-        self.speed = 2
+        self.speed = 1.5
         self.dash_speed = 18
         self.attack_cooldown = 35
 
@@ -112,6 +112,11 @@ class Spear(BasePlayer):
             self.frame_index += self.attack_anim_speed
         else:
             self.frame_index += self.anim_speed
+
+        if self.state == 'walk':
+            self.anim_speed = 0.8
+        else:
+            self.anim_speed = 0.05
 
         # END ATTACK
         if self.state == "attack" and self.frame_index >= len(frames):

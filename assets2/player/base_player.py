@@ -114,7 +114,7 @@ class BasePlayer(pygame.sprite.Sprite):
                 self.animations = {
 
                     "idle": load_spritesheet_row(f"{assets_folder}/Idle.png", 1, 0.2),
-                    "walk": load_frames(f"{assets_folder}/Walk", 0.5),
+                    "walk": load_frames(f"{assets_folder}/Walk", 0.056),
                     "dash": load_spritesheet_row(f"{assets_folder}/Dash.png", 1, 0.2),
                     "attack": load_frames(f"{assets_folder}/Attack", 0.2),
 
