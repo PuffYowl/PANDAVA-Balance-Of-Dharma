@@ -201,7 +201,7 @@ class MobileControls:
         self.visible = True
         self.scale = PIXEL_SCALE
 
-        self.font = font or pygame.font.Font(GAME_FONT_PATH, FONT_SIZE)
+        self.font = font or pygame.font.SysFont("monospace", FONT_SIZE, bold=True)
 
         # ---- Default geometry (used as fallback / "Reset to default") ----
         self._default_joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
