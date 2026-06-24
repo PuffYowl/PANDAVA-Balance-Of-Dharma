@@ -52,10 +52,8 @@ def _make_placeholder_portrait(label, color, size=(140, 140)):
 
 
 def _load_portrait(entry):
-    """
-    Coba load portrait dari file jika 'portrait_path' diisi dan file ada.
-    Kalau tidak ada / gagal, fallback ke placeholder buatan.
-    """
+    portrait_path = "assets2/portraits"
+
     path = entry.get("portrait_path")
     if path:
         try:
@@ -92,12 +90,12 @@ CHARACTER_REGISTRY = {
     },
     "Archer": {
         "display_name": "Archer",
-        "portrait_path": None,
+        "portrait_path": 'assets2/portraits/archer_portrait.png',
         "color": (60, 140, 70),
     },
     "Spear": {
         "display_name": "Spear",
-        "portrait_path": None,
+        "portrait_path": 'assets2/portraits/spear_portrait.png',
         "color": (200, 170, 40),
     },
     "Hammer": {

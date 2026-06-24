@@ -51,21 +51,22 @@ HUD_Y = 14          # top-left corner Y
 PORTRAIT_SIZE   = 96    # portrait square size (px)
 FRAME_BORDER    = 8     # wood frame border thickness (px)
 BAR_WIDTH       = 230   # width of health/stamina bars
-BAR_HEIGHT      = 28
+BAR_HEIGHT      = 15
 BAR_GAP         = 6     # vertical gap between health bar and stamina bar
 ROW_HEIGHT      = 46    # bottom counter row height
-ICON_SIZE       = 20    # diperkecil dari 34, dan sekarang ditaruh di bawah stamina bar
+ICON_SIZE       = 50    # diperkecil dari 34, dan sekarang ditaruh di bawah stamina bar
 
 # Fill these in with your own portrait file paths per character class
 # name (player.__class__.__name__). Leave a value as None to use the
 # pixel-art placeholder for that character until you have art ready.
 PORTRAIT_PATHS = {
     "Archer":  "assets2/portraits/archer_portrait.png",
+    "Spear":   "assets2/portraits/spear_portrait.png"
 }
 
 # Fill this in with your own pixelated water-drop icon path. Leave as
 # None to use the built-in pixel-art placeholder.
-WATER_ICON_PATH = None   # e.g. "assets2/icons/water_drop.png"
+WATER_ICON_PATH = "assets2/water_drop.png"
 
 
 

@@ -12,7 +12,7 @@ from enemy1 import Enemy
 from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
-from dialog_system import DialogBox, RESI_DIALOG_TREE
+from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED
 from player_hud import PlayerHUD, stamina_ratio_from_dash
 pygame.init() 
 
@@ -21,6 +21,7 @@ WIDTH, HEIGHT = 960, 540
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE | pygame.SCALED)
 pygame.display.set_caption("Pandava: Balance of Dharma")
 clock = pygame.time.Clock()
+
 
 # Virtual joystick + attack/dash buttons for mobile.
 # Set mobile_controls.visible = False to hide on desktop builds.
@@ -67,6 +68,27 @@ bg_map5 = pygame.transform.scale(bg_map5, (WIDTH, HEIGHT))
 bg_game    = bg_map1
 current_bg = 1
 
+# Background khusus saat dialog Resi aktif
+# File: assets2/background_resi.png  (940×768, pixel-art interior candi)
+_bg_resi_candidates = [
+    "assets2/background_resi.png",   # nama file yang dikirim
+    "assets2/bg_resi.png",           # nama alternatif lama
+]
+bg_resi = None
+for _bg_path in _bg_resi_candidates:
+    try:
+        bg_resi = pygame.image.load(_bg_path).convert()
+        bg_resi = pygame.transform.scale(bg_resi, (WIDTH, HEIGHT))
+        print(f"[BG RESI] Loaded: {_bg_path}")
+        break
+    except (pygame.error, FileNotFoundError):
+        pass
+if bg_resi is None:
+    # Fallback: warna ungu gelap kalau file belum ada di folder assets2
+    bg_resi = pygame.Surface((WIDTH, HEIGHT))
+    bg_resi.fill((30, 20, 45))
+    print("[BG RESI] File tidak ditemukan — pakai fallback warna gelap.")
+
 pixel_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
 btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 80)
 hud_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
@@ -84,9 +106,10 @@ ORANGE = (255, 160, 40)
 GOLD   = (255, 210, 60)
 BLUE   = (80,  160, 255)
 PURPLE = (180, 80,  255)
+GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 5
+LOBBY_DURATION   = 60
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -362,60 +385,168 @@ def main_menu():
         pygame.display.flip()
 
 # ================= CHARACTER SELECT =================
+def _draw_character_select_ui(surface, options, selected, title_font, hint_font):
+    """Render character select screen: cards + arrow buttons + checkmark button."""
+    surface.fill((15, 12, 28))
+
+    cx, cy = WIDTH // 2, HEIGHT // 2
+
+    # ── Cards ────────────────────────────────────────────────────
+    for i, char in enumerate(options):
+        offset = (i - selected) * 340
+        card   = char["card"]
+        if i == selected:
+            card = pygame.transform.scale(card, (300, 420))
+            # Golden border on selected card
+            card_rect = card.get_rect(center=(cx + offset, cy))
+            pygame.draw.rect(surface, GOLD, card_rect.inflate(6, 6), 3, border_radius=6)
+        else:
+            card = pygame.transform.scale(card, (240, 340))
+            card_rect = card.get_rect(center=(cx + offset, cy))
+        surface.blit(card, card_rect)
+
+    # ── Title ────────────────────────────────────────────────────
+    title_surf = title_font.render("SELECT CHARACTER", True, GOLD)
+    surface.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 10))
+
+    # ── Arrow LEFT button ────────────────────────────────────────
+    arrow_btn_size = 54
+    left_rect  = pygame.Rect(cx - 280 - arrow_btn_size // 2, cy - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+    right_rect = pygame.Rect(cx + 280 - arrow_btn_size // 2, cy - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+
+    mouse_pos = pygame.mouse.get_pos()
+
+    def draw_arrow_btn(rect, symbol, hovered):
+        color  = (200, 170, 40) if hovered else (80, 70, 40)
+        border = (255, 220, 80) if hovered else (120, 100, 50)
+        pygame.draw.rect(surface, border, rect.inflate(4, 4), border_radius=10)
+        pygame.draw.rect(surface, color,  rect,               border_radius=9)
+        arrow_surf = title_font.render(symbol, True, WHITE)
+        surface.blit(arrow_surf, arrow_surf.get_rect(center=rect.center))
+
+    draw_arrow_btn(left_rect,  "◄", left_rect.collidepoint(mouse_pos))
+    draw_arrow_btn(right_rect, "►", right_rect.collidepoint(mouse_pos))
+
+    # ── Checkmark CONFIRM button ──────────────────────────────────
+    check_w, check_h = 180, 56
+    check_rect = pygame.Rect(cx - check_w // 2, HEIGHT - check_h - 24, check_w, check_h)
+    check_hover = check_rect.collidepoint(mouse_pos)
+    check_color  = (40, 180, 80)  if check_hover else (30, 120, 55)
+    check_border = (80, 255, 120) if check_hover else (50, 160, 80)
+    pygame.draw.rect(surface, check_border, check_rect.inflate(4, 4), border_radius=12)
+    pygame.draw.rect(surface, check_color,  check_rect,               border_radius=11)
+    check_surf = title_font.render("✓  Pilih", True, WHITE)
+    surface.blit(check_surf, check_surf.get_rect(center=check_rect.center))
+
+    # ── Keyboard hint ─────────────────────────────────────────────
+    hint_surf = hint_font.render("◄ / ► untuk memilih   |   Enter / ✓ untuk konfirmasi", True, (160, 160, 160))
+    surface.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, HEIGHT - 22))
+
+    return left_rect, right_rect, check_rect
+
+
 def character_select():
     global state, selected_class, player, players
     options = [
-        {"class": Archer,  "card": card_arjuna},
-        {"class": Spear,   "card": card_yudhistira},
-        {"class": Hammer,  "card": card_bima},
-        {"class": Assasin, "card": card_yudhistira},
+        {"class": Archer,  "card": card_arjuna,     "name": "Arjuna"},
+        {"class": Spear,   "card": card_yudhistira,  "name": "Yudhistira"},
+        {"class": Hammer,  "card": card_bima,        "name": "Bima"},
+        {"class": Assasin, "card": card_yudhistira,  "name": "Assasin"},
     ]
-    selected = 0
+    selected  = 0
+    sel_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
+    hint_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    # Inisialisasi dummy supaya event handler tidak error sebelum frame pertama digambar
+    left_rect  = pygame.Rect(0, 0, 1, 1)
+    right_rect = pygame.Rect(0, 0, 1, 1)
+    check_rect = pygame.Rect(0, 0, 1, 1)
+
+    def confirm_selection():
+        nonlocal selected
+        global state, selected_class, player, players
+        selected_class = options[selected]["class"]
+        player  = selected_class(400, 300)
+        player.mobile_controls = mobile_controls
+        players = pygame.sprite.Group(player)
+        broadcast_character(player)
+        player_hud.set_character(player.__class__.__name__)
+        state = "game"
+
     while state == "select":
         clock.tick(FPS)
-        screen.fill((20, 20, 20))
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
+
+            # ── Keyboard ─────────────────────────────────────────
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RIGHT:
                     selected = (selected + 1) % len(options)
                 if event.key == pygame.K_LEFT:
                     selected = (selected - 1) % len(options)
                 if event.key == pygame.K_RETURN:
-                    selected_class = options[selected]["class"]
-                    player  = selected_class(400, 300)
-                    player.mobile_controls = mobile_controls
-                    players = pygame.sprite.Group(player)
-                    broadcast_character(player)
-                    player_hud.set_character(player.__class__.__name__)
-                    state   = "game"
-        cx, cy = WIDTH // 2, HEIGHT // 2
-        for i, char in enumerate(options):
-            offset = (i - selected) * 350
-            card   = char["card"]
-            card   = pygame.transform.scale(card, (340, 450) if i == selected else (280, 380))
-            screen.blit(card, card.get_rect(center=(cx + offset, cy)))
-        title = btn_font.render("SELECT CHARACTER", True, WHITE)
-        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 1))
+                    confirm_selection()
+                    return
+
+            # ── Mouse click ───────────────────────────────────────
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                if left_rect.collidepoint(mx, my):
+                    selected = (selected - 1) % len(options)
+                elif right_rect.collidepoint(mx, my):
+                    selected = (selected + 1) % len(options)
+                elif check_rect.collidepoint(mx, my):
+                    confirm_selection()
+                    return
+
+            # ── Touch ─────────────────────────────────────────────
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if left_rect.collidepoint(tx, ty):
+                    selected = (selected - 1) % len(options)
+                elif right_rect.collidepoint(tx, ty):
+                    selected = (selected + 1) % len(options)
+                elif check_rect.collidepoint(tx, ty):
+                    confirm_selection()
+                    return
+
+        left_rect, right_rect, check_rect = _draw_character_select_ui(
+            screen, options, selected, sel_font, hint_font
+        )
         pygame.display.flip()
 
 # ================= PAUSE MENU =================
-def pause_menu():
+def pause_menu(frozen_frame=None):
     """Blocking loop — the game is fully frozen while this runs because
     no update() calls happen here, only drawing the captured frozen frame.
 
-    Returns one of: 'resume' | 'select' | 'settings' | 'menu'
+    Returns a tuple: (result, frozen_frame)
+      result        — one of: 'resume' | 'select' | 'settings' | 'menu'
+      frozen_frame  — the captured gameplay snapshot used as this pause
+                       menu's background. Pass it back into the NEXT
+                       pause_menu() call (e.g. after Settings/Character
+                       Select returns) so the background stays the
+                       original gameplay frame instead of being re-captured
+                       from whatever screen is currently drawn.
 
     To replace placeholder buttons with your own assets later:
     - Replace draw_pause_btn() with a blit of your own button sprite.
     - The rect objects (resume_rect, select_rect, settings_rect, menu_rect)
       control hit areas and stay the same regardless of how you draw the buttons.
     - The frozen_frame capture and overlay fill stay the same.
+
+    frozen_frame param: optional pre-captured snapshot of the game scene.
+    If omitted, the current screen contents are captured (used for the very
+    first open, when the screen still shows live gameplay).
     """
     # Capture the exact pixel state of the screen at the moment pause was pressed.
     # This is blitted every frame of the pause loop so the game scene shows through.
-    frozen_frame = screen.copy()
+    if frozen_frame is None:
+        frozen_frame = screen.copy()
 
     # Semi-transparent dark overlay — change the 4th value (0-255) to adjust darkness.
     # 160 ≈ 63% opacity, enough to darken without completely hiding the scene.
@@ -432,9 +563,10 @@ def pause_menu():
     settings_rect = pygame.Rect(btn_x, HEIGHT // 2 + gap * 0.5, btn_w, btn_h)
     menu_rect     = pygame.Rect(btn_x, HEIGHT // 2 + gap * 1.5, btn_w, btn_h)
 
-    # Placeholder fonts — replace with your game fonts or loaded assets later.
-    pause_title_font = pygame.font.SysFont("arial", 48, bold=True)
-    pause_btn_font   = pygame.font.SysFont("arial", 26, bold=True)
+    # Pause menu now uses the game's custom pixel font instead of system Arial,
+    # so it matches the rest of the UI (HUD, timer panel, dialog box, etc).
+    pause_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 48)
+    pause_btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 26)
 
     # Placeholder button colors
     BTN_IDLE   = (80,  80,  80)
@@ -467,36 +599,36 @@ def pause_menu():
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    return "resume"
+                    return "resume", frozen_frame
 
             # Mouse click
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if resume_rect.collidepoint(mouse_pos):
-                    return "resume"
+                    return "resume", frozen_frame
                 if select_rect.collidepoint(mouse_pos):
-                    return "select"
+                    return "select", frozen_frame
                 if settings_rect.collidepoint(mouse_pos):
-                    return "settings"
+                    return "settings", frozen_frame
                 if menu_rect.collidepoint(mouse_pos):
-                    return "menu"
+                    return "menu", frozen_frame
 
             # Touch tap directly on pause menu buttons
             if event.type == pygame.FINGERDOWN:
                 tx = int(event.x * WIDTH)
                 ty = int(event.y * HEIGHT)
                 if resume_rect.collidepoint(tx, ty):
-                    return "resume"
+                    return "resume", frozen_frame
                 if select_rect.collidepoint(tx, ty):
-                    return "select"
+                    return "select", frozen_frame
                 if settings_rect.collidepoint(tx, ty):
-                    return "settings"
+                    return "settings", frozen_frame
                 if menu_rect.collidepoint(tx, ty):
-                    return "menu"
+                    return "menu", frozen_frame
 
         # Pressing the pause button again resumes (one-shot flag consumed here)
         if mobile_controls.pause_just_pressed:
             mobile_controls.pause_just_pressed = False
-            return "resume"
+            return "resume", frozen_frame
 
         # ---- Draw: frozen game → dark overlay → pause UI ----
         screen.blit(frozen_frame, (0, 0))
@@ -523,18 +655,24 @@ def pause_menu():
 # ================= SETTINGS MENU (from pause) =================
 def settings_menu():
     """
-    Lets the player drag the joystick / ATK / DASH buttons anywhere they like,
-    then Save or Reset the layout. The pause button is intentionally NOT
-    repositionable here — it always stays fixed top-center.
+    Lets the player drag the joystick / ATK / DASH buttons anywhere they like.
+    The pause button is intentionally NOT repositionable here — it always
+    stays fixed top-center.
 
-    Returns to the pause menu when the player presses Back/ESC.
-    Saving persists to assets2/controls_layout.json via mobile_controls.save_layout(),
-    so the custom layout is automatically reloaded next time the game starts
-    (MobileControls.__init__ calls load_layout() already).
+    Layout changes take effect IMMEDIATELY (live, in-memory) the moment the
+    player drags a control — there's no need to Save or restart the game to
+    see the new position. "Save" only persists the layout to disk
+    (assets2/controls_layout.json) so it's remembered the NEXT time the game
+    is launched; "Reset Default" snaps back to the built-in default
+    positions (also live, immediately).
+
+    Returns to the pause menu when the player presses Back/ESC. Whatever
+    layout is active at that moment keeps being used in-game right away.
     """
-    title_font  = pygame.font.SysFont("arial", 40, bold=True)
-    btn_font    = pygame.font.SysFont("arial", 24, bold=True)
-    hint_font   = pygame.font.SysFont("arial", 18)
+    # Settings menu also uses the custom pixel font now, to match the rest of the UI.
+    title_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 40)
+    btn_font    = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
+    hint_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 18)
 
     btn_w, btn_h = 170, 50
     gap = 16
@@ -559,10 +697,6 @@ def settings_menu():
         screen.blit(label, (rect.centerx - label.get_width()  // 2,
                              rect.centery - label.get_height() // 2))
 
-    # Snapshot so "Back" without saving can restore the layout exactly as it
-    # was before the player started dragging things around.
-    layout_before_editing = mobile_controls.get_layout_dict()
-
     mobile_controls.start_edit_mode()
 
     save_flash_timer = 0  # frames remaining to show "Saved!" feedback text
@@ -576,7 +710,10 @@ def settings_menu():
                 pygame.quit(); sys.exit()
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                mobile_controls.apply_layout_dict(layout_before_editing)
+                # Back without saving to disk — but the in-memory layout the
+                # player just dragged into place stays active immediately,
+                # it is NOT reverted. Only "Reset Default" or relaunching the
+                # game without ever pressing Save will lose it.
                 mobile_controls.stop_edit_mode()
                 return
 
@@ -589,7 +726,8 @@ def settings_menu():
                     mobile_controls.reset_layout()
                     continue
                 if back_rect.collidepoint(mouse_pos):
-                    mobile_controls.apply_layout_dict(layout_before_editing)
+                    # Keep the dragged-into-place layout active immediately;
+                    # only stop edit mode and return to the pause menu.
                     mobile_controls.stop_edit_mode()
                     return
 
@@ -604,7 +742,8 @@ def settings_menu():
                     mobile_controls.reset_layout()
                     continue
                 if back_rect.collidepoint(tx, ty):
-                    mobile_controls.apply_layout_dict(layout_before_editing)
+                    # Keep the dragged-into-place layout active immediately;
+                    # only stop edit mode and return to the pause menu.
                     mobile_controls.stop_edit_mode()
                     return
 
@@ -646,18 +785,25 @@ def character_select_from_pause():
     switching state directly — so game_loop stays in control of what happens next.
     Returns None if the player presses ESC to go back to the pause menu."""
     options = [
-        {"class": Archer,  "card": card_arjuna},
-        {"class": Spear,   "card": card_yudhistira},
-        {"class": Hammer,  "card": card_bima},
-        {"class": Assasin, "card": card_yudhistira},
+        {"class": Archer,  "card": card_arjuna,    "name": "Arjuna"},
+        {"class": Spear,   "card": card_yudhistira, "name": "Yudhistira"},
+        {"class": Hammer,  "card": card_bima,       "name": "Bima"},
+        {"class": Assasin, "card": card_yudhistira, "name": "Assasin"},
     ]
-    selected = 0
+    selected  = 0
+    sel_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
+    hint_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    left_rect  = pygame.Rect(0, 0, 1, 1)
+    right_rect = pygame.Rect(0, 0, 1, 1)
+    check_rect = pygame.Rect(0, 0, 1, 1)
+
     while True:
         clock.tick(FPS)
-        screen.fill((20, 20, 20))
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
+
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RIGHT:
                     selected = (selected + 1) % len(options)
@@ -666,17 +812,35 @@ def character_select_from_pause():
                 if event.key == pygame.K_RETURN:
                     return options[selected]["class"]
                 if event.key == pygame.K_ESCAPE:
-                    return None  # back to pause menu
-        cx, cy = WIDTH // 2, HEIGHT // 2
-        for i, char in enumerate(options):
-            offset = (i - selected) * 350
-            card   = char["card"]
-            card   = pygame.transform.scale(card, (340, 450) if i == selected else (280, 380))
-            screen.blit(card, card.get_rect(center=(cx + offset, cy)))
-        title = btn_font.render("SELECT CHARACTER", True, WHITE)
-        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 1))
-        hint = pixel_font.render("ESC — back to pause", True, (150, 150, 150))
-        screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 40))
+                    return None
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                if left_rect.collidepoint(mx, my):
+                    selected = (selected - 1) % len(options)
+                elif right_rect.collidepoint(mx, my):
+                    selected = (selected + 1) % len(options)
+                elif check_rect.collidepoint(mx, my):
+                    return options[selected]["class"]
+
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if left_rect.collidepoint(tx, ty):
+                    selected = (selected - 1) % len(options)
+                elif right_rect.collidepoint(tx, ty):
+                    selected = (selected + 1) % len(options)
+                elif check_rect.collidepoint(tx, ty):
+                    return options[selected]["class"]
+
+        left_rect, right_rect, check_rect = _draw_character_select_ui(
+            screen, options, selected, sel_font, hint_font
+        )
+        # ESC hint (khusus from-pause)
+        esc_surf = pygame.font.Font("assets2/font/A Friend In Deed.otf", 15).render(
+            "ESC — kembali ke pause", True, (120, 120, 120)
+        )
+        screen.blit(esc_surf, (8, HEIGHT - 18))
         pygame.display.flip()
 
 
@@ -701,6 +865,55 @@ def restart_from_pause(new_player_class):
     enemy_respawn_timer = 0
 
 
+# ================= FULL RESET (setelah mati) =================
+def full_reset():
+    """
+    Reset SEMUA state permainan ke kondisi awal — dipanggil setelah player
+    mati dan memilih 'Play Again', sebelum masuk ke character select.
+
+    Yang di-reset:
+    - Phase → lobby (fight), timer diulang dari awal
+    - Map → kembali ke map 1
+    - Enemies → semua mati, satu musuh baru di spawn pos
+    - Relic & Portal → generate ulang (baru & random)
+    - Relic notif timer → 0
+    - Water count → 0
+    - Arrows → kosong
+    - Dialog box → ditutup paksa
+    - Enemy respawn timer → 0
+    """
+    global phase, phase_frames, bg_game, current_bg
+    global enemies, enemy_respawn_timer
+    global relic, portal, relic_notif_timer
+    global water_count, arrows
+
+    # Phase & map
+    phase        = "lobby"
+    phase_frames = LOBBY_DURATION * FPS
+    bg_game      = bg_map1
+    current_bg   = 1
+
+    # Enemies — hapus semua, spawn satu musuh baru dengan HP penuh
+    enemies.empty()
+    enemies.add(Enemy(*enemy_spawn_pos))
+    enemy_respawn_timer = 0
+
+    # Relic & Portal — generate ulang supaya fresh
+    relic  = generate_relic()
+    portal = generate_portal_resi()
+    relic_notif_timer = 0
+    print(f"[FULL RESET] Relic baru: '{relic['name']}' di Map {relic['map']}")
+    print(f"[FULL RESET] Portal Resi baru di Map {portal['map']}")
+
+    # Bersihkan panah & dialog
+    arrows.empty()
+    dialog_box.close()
+    dialog_box.player_relics.clear()   # reset koleksi prasasti player
+
+    # Currency
+    water_count = 0
+
+
 # ================= PHASE TRANSITION HELPERS =================
 def start_lobby():
     global phase, phase_frames, bg_game, current_bg
@@ -721,6 +934,134 @@ def start_explore():
     player.rect.center = BG2_SPAWN_POS
     enemies.empty()
 
+
+# ================= APPLY DIALOG ACTION =================
+def apply_dialog_action(action_key):
+    """
+    Dipanggil dari game_loop setiap kali dialog box ditutup dan node
+    terakhir yang ditampilkan memiliki field "action".
+    Membaca PRASASTI_BUFFS dari dialog_system untuk menentukan buff-nya.
+    """
+    global player
+    if not action_key or action_key not in PRASASTI_BUFFS:
+        return
+
+    buff = PRASASTI_BUFFS[action_key]
+
+    # Healing — pulihkan HP penuh
+    if buff.get("heal_full"):
+        player.health = player.max_health
+        print(f"[DIALOG ACTION] Healing: HP dipulihkan ke {player.max_health}")
+        return
+
+    # Stat upgrade
+    dmg_up   = buff.get("damage", 0)
+    speed_up = buff.get("speed",  0)
+
+    if dmg_up:
+        player.damage += dmg_up
+        print(f"[DIALOG ACTION] {action_key}: damage +{dmg_up} → {player.damage}")
+
+    if speed_up:
+        player.speed += speed_up
+        print(f"[DIALOG ACTION] {action_key}: speed +{speed_up:.1f} → {player.speed:.1f}")
+
+
+# ================= DEATH SCREEN =================
+def death_screen():
+    """
+    Layar kematian — tampil ketika HP player ≤ 0.
+    Tombol 'Play Again' → character select (restart fresh).
+    Tombol 'Quit'       → keluar program.
+    Mengembalikan 'restart' atau 'quit'.
+    """
+    death_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 100)
+    death_sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 32)
+    death_btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 28)
+
+    btn_w, btn_h = 240, 60
+    cx = WIDTH  // 2
+    cy = HEIGHT // 2
+
+    play_again_rect = pygame.Rect(cx - btn_w - 20, cy + 80, btn_w, btn_h)
+    quit_rect       = pygame.Rect(cx + 20,          cy + 80, btn_w, btn_h)
+
+    # Fade-in timer
+    fade_alpha = 0
+
+    # Overlay gelap
+    overlay = pygame.Surface((WIDTH, HEIGHT))
+    overlay.fill((0, 0, 0))
+
+    # Ambil snapshot gameplay sebagai latar
+    snapshot = screen.copy()
+
+    clock_ds = pygame.time.Clock()
+
+    while True:
+        clock_ds.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if play_again_rect.collidepoint(mouse_pos):
+                    return "restart"
+                if quit_rect.collidepoint(mouse_pos):
+                    return "quit"
+
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if play_again_rect.collidepoint(tx, ty):
+                    return "restart"
+                if quit_rect.collidepoint(tx, ty):
+                    return "quit"
+
+        # Fade in overlay
+        if fade_alpha < 210:
+            fade_alpha = min(210, fade_alpha + 4)
+
+        # ── Draw ──────────────────────────────────────────────────
+        screen.blit(snapshot, (0, 0))
+
+        overlay.set_alpha(fade_alpha)
+        screen.blit(overlay, (0, 0))
+
+        # "YOU ARE DEAD" — merah tebal dengan shadow
+        dead_shadow = death_title_font.render("YOU ARE DEAD", True, (80, 0, 0))
+        dead_text   = death_title_font.render("YOU ARE DEAD", True, (220, 30, 30))
+        dead_rect   = dead_text.get_rect(center=(cx, cy - 60))
+        screen.blit(dead_shadow, (dead_rect.x + 4, dead_rect.y + 4))
+        screen.blit(dead_text,   dead_rect)
+
+        # Sub-text
+        sub_surf = death_sub_font.render("Perjalananmu berakhir di sini, pendekar...", True, (200, 150, 150))
+        screen.blit(sub_surf, sub_surf.get_rect(center=(cx, cy + 20)))
+
+        # ── Tombol Play Again ─────────────────────────────────────
+        pa_hover  = play_again_rect.collidepoint(mouse_pos)
+        pa_color  = (40, 160, 80)  if pa_hover else (25, 100, 50)
+        pa_border = (80, 255, 120) if pa_hover else (50, 150, 75)
+        pygame.draw.rect(screen, pa_border, play_again_rect.inflate(4, 4), border_radius=10)
+        pygame.draw.rect(screen, pa_color,  play_again_rect,               border_radius=9)
+        pa_surf = death_btn_font.render("▶  Play Again", True, WHITE)
+        screen.blit(pa_surf, pa_surf.get_rect(center=play_again_rect.center))
+
+        # ── Tombol Quit ───────────────────────────────────────────
+        q_hover  = quit_rect.collidepoint(mouse_pos)
+        q_color  = (160, 40, 40) if q_hover else (100, 25, 25)
+        q_border = (255, 80, 80) if q_hover else (150, 50, 50)
+        pygame.draw.rect(screen, q_border, quit_rect.inflate(4, 4), border_radius=10)
+        pygame.draw.rect(screen, q_color,  quit_rect,               border_radius=9)
+        q_surf = death_btn_font.render("✕  Quit", True, WHITE)
+        screen.blit(q_surf, q_surf.get_rect(center=quit_rect.center))
+
+        pygame.display.flip()
+
+
 # ================= GAME LOOP =================
 def game_loop():
     global state, enemy_respawn_timer, player, players
@@ -728,9 +1069,38 @@ def game_loop():
     global phase, phase_frames
     global relic_notif_timer
     global water_count
+    global relic, portal
+
+    # Track action dari node dialog terakhir yang punya "action" field
+    last_dialog_action = None
+    prev_dialog_active = False
 
     while state == "game":
         clock.tick(FPS)
+
+        # ================= DETEKSI KEMATIAN PLAYER =================
+        if player.health <= 0:
+            result = death_screen()
+            if result == "quit":
+                pygame.quit(); sys.exit()
+            else:  # "restart" → reset semua lalu ke character select
+                full_reset()
+                state = "select"
+                return
+
+        # ================= APPLY DIALOG ACTION (saat dialog baru saja ditutup) =====
+        # Cek apakah dialog baru saja ditutup frame ini
+        if prev_dialog_active and not dialog_box.active:
+            if last_dialog_action:
+                apply_dialog_action(last_dialog_action)
+                last_dialog_action = None
+        prev_dialog_active = dialog_box.active
+
+        # Rekam action dari node aktif saat dialog sedang berjalan
+        if dialog_box.active:
+            node = dialog_box._current_node()
+            if node and "action" in node:
+                last_dialog_action = node["action"]
 
         # ================= TICK PHASE TIMER =================
         # Dialog yang aktif membekukan timer fase juga, supaya waktu lobby/explore
@@ -740,6 +1110,11 @@ def game_loop():
                 phase_frames -= 1
             else:
                 if phase == "lobby":
+                    # ── Fight phase selesai → generate relic & portal baru ──
+                    relic  = generate_relic()
+                    portal = generate_portal_resi()
+                    print(f"[PHASE] Fight selesai! Relic baru: '{relic['name']}' di Map {relic['map']}")
+                    print(f"[PHASE] Portal Resi baru di Map {portal['map']}")
                     start_explore()
                 else:
                     start_lobby()
@@ -772,19 +1147,9 @@ def game_loop():
         mobile_controls.update()
 
         if dialog_box.active:
-            screen.blit(bg_game, (0, 0))
-            enemies.draw(screen)
-            for enemy in enemies:
-                enemy.draw_healthbar(screen)
-            draw_relic()
-            draw_portal()
-            player.draw(screen)
-            player.draw_healthbar(screen)
-            arrows.draw(screen)
-            draw_relic_notif()
-            draw_timer_panel()
-            player_hud.draw(screen, player.health, player.max_health,
-                             stamina_ratio_from_dash(player), water_count)
+            # Saat dialog Resi aktif, gunakan bg_resi sebagai latar
+            # (bukan abu-abu polos) supaya suasana lebih atmosferik.
+            screen.blit(bg_resi, (0, 0))
             dialog_box.draw(screen)
             # NOTE: mobile_controls.draw() intentionally NOT called here —
             # joystick/ATK/DASH/pause are hidden while a dialog is open so
@@ -799,12 +1164,13 @@ def game_loop():
             should_pause = True
 
         if should_pause:
-            result = pause_menu()
-            # Loop here so "Back" from Settings returns to the pause menu
-            # instead of immediately resuming gameplay.
+            result, frozen_frame = pause_menu()
+            # Loop here so "Back" from Settings returns to the SAME pause
+            # menu screen (same frozen background) instead of capturing a
+            # new frozen_frame from the settings UI that's currently drawn.
             while result == "settings":
                 settings_menu()
-                result = pause_menu()
+                result, frozen_frame = pause_menu(frozen_frame)
             if result == "select":
                 chosen = character_select_from_pause()
                 if chosen is not None:
@@ -817,6 +1183,8 @@ def game_loop():
 
         # ================= UPDATE =================
         players.update()
+
+        player.rect.clamp_ip(screen.get_rect())
 
         if player.spawn_arrow:
             arrow = Arrow(player.rect.centerx, player.rect.centery, player.facing)
@@ -907,7 +1275,10 @@ def game_loop():
                 if pressed_e and not show_interact:
                     relic["collected"] = True
                     relic_notif_timer  = 180
-                    print(f"[RELIC] '{relic['name']}' berhasil diambil!")
+                    # Catat kepemilikan relic ke dialog_box supaya Resi bisa
+                    # memvalidasi sebelum menerima penukaran prasasti.
+                    dialog_box.player_relics.add(relic["name"])
+                    print(f"[RELIC] '{relic['name']}' berhasil diambil! Koleksi: {dialog_box.player_relics}")
 
         # ================= PORTAL RESI INTERACTION =================
         # Terpisah dari relic biasa: tidak pernah "collected", jadi bisa
@@ -918,7 +1289,11 @@ def game_loop():
             if player.rect.colliderect(portal_pickup_range):
                 near_portal = True
                 if pressed_e and not show_interact:
-                    dialog_box.open(RESI_DIALOG_TREE, start_key="start")
+                    dialog_box.open(
+                        RESI_DIALOG_TREE,
+                        start_key="start",
+                        npc_portrait="assets2/resi_abimayasa.png",
+                    )
 
         # Eksekusi pindah map
         if show_interact and pressed_e and portal_open:
@@ -968,7 +1343,6 @@ def game_loop():
         draw_portal()
 
         player.draw(screen)
-        player.draw_healthbar(screen)
 
         arrows.draw(screen)
 

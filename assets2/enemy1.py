@@ -43,7 +43,7 @@ class Enemy(pygame.sprite.Sprite):
         self.animations = {
 
                 "walk": load_frames(f"{assets_folder}/Walk", 0.2),
-                "die": load_frames(f"{assets_folder}/Die", 0.2),
+                "die": load_frames(f"{assets_folder}/Die", 0.13),
                 "attack": load_frames(f"{assets_folder}/Attack", 0.25),
 
             }
@@ -54,6 +54,7 @@ class Enemy(pygame.sprite.Sprite):
             5,
             scale=2
         )
+
 
         self.state = "walk"
         self.frame_index = 0
@@ -188,19 +189,22 @@ class Enemy(pygame.sprite.Sprite):
         self.hit_cooldown = 0
         self.hit_flash_timer = 0
 
+        # 🔥 RESET LOCK (kalau pakai sistem lock attack)
         self.locked_midbottom = None
 
+        # posisi baru
         self.x = random.randint(80, 880)
         self.y = random.randint(80, 460)
 
+        # 🔥 SYNC FLOAT + RECT
         self.rect.center = (int(self.x), int(self.y))
 
     # ================= ANIMATION =================
     def animate(self):
         frames = self.animations[self.state]
-
+ 
         self.frame_index += self.anim_speed
-
+ 
         if self.frame_index >= len(frames):
             if self.state == "die":
                 self.frame_index = len(frames) - 1
@@ -210,29 +214,32 @@ class Enemy(pygame.sprite.Sprite):
                 self.frame_index = 0
             else:
                 self.frame_index = 0
-
+ 
         # ===== FIX OFFSET =====
         old_midbottom = self.rect.midbottom  # simpan posisi kaki
-
+ 
         self.image = frames[int(self.frame_index)]
-
+ 
         # speed animasi
         if self.state == "attack":
             self.anim_speed = 0.4
         elif self.state == "die":
             self.anim_speed = 0.3
-            self.image = pygame.transform.flip(self.image, True, False)
         elif self.state == "walk":
             self.anim_speed = 0.2
-
-
+ 
+        # Flip berdasarkan facing untuk SEMUA state (termasuk "die"),
+        # bukan selalu di-flip seperti sebelumnya. Sebelumnya kode lama
+        # selalu memanggil flip saat state == "die" tanpa mengecek
+        # facing, sehingga arah hadap mati tidak pernah benar-benar
+        # mengikuti posisi player.
+        if self.facing == -1:
+            self.image = pygame.transform.flip(self.image, True, False)
+ 
         # reset rect biar gak geser
         self.rect = self.image.get_rect()
         self.rect.midbottom = old_midbottom
-
-        if self.facing == -1:
-            self.image = pygame.transform.flip(self.image, True, False)
-
+ 
         # hit flash
         if self.hit_flash_timer > 0:
             flash = self.image.copy()

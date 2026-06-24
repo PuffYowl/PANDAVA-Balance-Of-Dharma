@@ -22,6 +22,10 @@ BUTTON_GAP            = 108     # vertical gap between ATK/DASH buttons
 
 FONT_SIZE = 16
 
+# ---- Game's custom pixel font, same file used throughout main.py, so the
+# pause button label, edit-mode drag labels, and HUD text all match. ----
+GAME_FONT_PATH = "assets2/font/A Friend In Deed.otf"
+
 # ---- Pause button (top-center, UI only — not gameplay input) ----
 PAUSE_BTN_SIZE   = 48   # width and height of the square button (px)
 PAUSE_BTN_MARGIN = 14   # distance from top edge
@@ -158,21 +162,35 @@ def _build_button(radius, scale, label, font, pressed, mid_color, light_color, d
     return surf
 
 
+PAUSE_BTN_IMAGE_PATH = "assets2/pause_btn.png"
+
+
 def _build_pause_button(size, pressed):
-    """Pre-render the pause button square — placeholder style (grey square, Arial 'P').
-    To replace with your own asset later: load your image with
-    pygame.image.load(...).convert_alpha(), scale to (size, size), and return it
-    instead of building this surface. Make a pressed variant by darkening with
-    surf.fill((0,0,0,60), special_flags=pygame.BLEND_RGBA_MULT)."""
+    """Loads and scales the pause button sprite from PAUSE_BTN_IMAGE_PATH.
+
+    The source image's aspect ratio is preserved (it doesn't have to be a
+    perfect square) — it's scaled to fit within a `size`x`size` box and
+    centered there, so it never looks squashed or stretched. Scaling uses
+    nearest-neighbor (pygame.transform.scale) rather than smoothscale so
+    small pixel-art source images stay crisp instead of blurring.
+
+    The "pressed" variant is the same sprite darkened (no separate pressed
+    asset needed). If you later add a dedicated pressed-state image, load
+    it directly here instead of darkening.
+    """
+    img = pygame.image.load(PAUSE_BTN_IMAGE_PATH).convert_alpha()
+
+    src_w, src_h = img.get_size()
+    scale_factor = min(size / src_w, size / src_h)
+    new_w = max(1, round(src_w * scale_factor))
+    new_h = max(1, round(src_h * scale_factor))
+    img = pygame.transform.scale(img, (new_w, new_h))
+
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
-    body   = (180, 180, 180) if pressed else (100, 100, 100)
-    border = (40,  40,  40)
-    pygame.draw.rect(surf, border, (0, 0, size, size),             border_radius=6)
-    pygame.draw.rect(surf, body,   (2, 2, size - 4, size - 4),    border_radius=5)
-    font  = pygame.font.SysFont("arial", size // 2, bold=True)
-    label = font.render("P", True, (20, 20, 20))
-    surf.blit(label, (size // 2 - label.get_width()  // 2,
-                      size // 2 - label.get_height() // 2))
+    surf.blit(img, ((size - new_w) // 2, (size - new_h) // 2))
+
+    if pressed:
+        surf.fill((0, 0, 0, 60), special_flags=pygame.BLEND_RGBA_MULT)
     return surf
 
 
@@ -183,7 +201,7 @@ class MobileControls:
         self.visible = True
         self.scale = PIXEL_SCALE
 
-        self.font = font or pygame.font.SysFont("monospace", FONT_SIZE, bold=True)
+        self.font = font or pygame.font.Font(GAME_FONT_PATH, FONT_SIZE)
 
         # ---- Default geometry (used as fallback / "Reset to default") ----
         self._default_joy_center = (JOYSTICK_MARGIN, height - JOYSTICK_MARGIN)
@@ -556,7 +574,7 @@ class MobileControls:
     def _draw_edit_overlay(self, surface):
         """Subtle highlight rings + labels under each draggable control so it's
         obvious in the settings screen that they can be picked up and moved."""
-        font = pygame.font.SysFont("arial", 16, bold=True)
+        font = pygame.font.Font(GAME_FONT_PATH, 16)
         targets = [
             (self.joy_center, JOYSTICK_RADIUS_OUTER + 14, "Joystick"),
             (self.btn_attack_center, BUTTON_RADIUS + 14, "Attack"),
