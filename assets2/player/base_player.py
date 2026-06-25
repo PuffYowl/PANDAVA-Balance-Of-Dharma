@@ -140,6 +140,13 @@ class BasePlayer(pygame.sprite.Sprite):
         self.dash_timer = 0
         self.dash_duration = 10
         self.dash_cooldown = 40
+        # Arah dash sebagai vektor (dx, dy) ter-normalisasi, ditentukan
+        # saat dash MULAI berdasarkan tombol arah yang sedang ditahan.
+        # Default (1, 0) artinya dash horizontal mengikuti facing, sama
+        # seperti perilaku sebelumnya kalau tidak ada tombol atas/bawah
+        # yang ditahan saat dash dipicu.
+        self.dash_dir_x = 1
+        self.dash_dir_y = 0
 
         # ATTACK
         self.attacking = False
@@ -182,36 +189,70 @@ class BasePlayer(pygame.sprite.Sprite):
             self.anim_speed = 5
  
  
+        # Baca tombol arah LEBIH AWAL (sebelum cek dash), supaya kalau
+        # dash baru mau dipicu di frame ini, kita tahu arah mana yang
+        # sedang ditahan untuk menentukan arah dash (atas/bawah/diagonal),
+        # bukan cuma horizontal seperti sebelumnya.
+        move_left  = keys[pygame.K_a] or (mc and mc.move_left)
+        move_right = keys[pygame.K_d] or (mc and mc.move_right)
+        move_up    = keys[pygame.K_w] or (mc and mc.move_up)
+        move_down  = keys[pygame.K_s] or (mc and mc.move_down)
+
         # DASH
         dash_pressed = keys[pygame.K_LSHIFT] or (mc and mc.dash)
- 
+
         if dash_pressed and not self.dashing and self.dash_timer == 0:
- 
+
             self.dashing = True
             self.dash_timer = self.dash_duration
             self.state = "dash"
- 
- 
+
+            # Tentukan arah dash dari tombol yang sedang ditahan SAAT
+            # dash dipicu. Kalau tidak ada arah yang ditahan (atau hanya
+            # menahan arah horizontal), dash tetap mengikuti facing
+            # seperti sebelumnya — jadi perilaku lama tidak berubah.
+            dir_x = 0
+            dir_y = 0
+            if move_left:
+                dir_x = -1
+            if move_right:
+                dir_x = 1
+            if move_up:
+                dir_y = -1
+            if move_down:
+                dir_y = 1
+
+            if dir_x == 0 and dir_y == 0:
+                # Tidak ada tombol arah ditahan — dash horizontal sesuai facing
+                dir_x = self.facing
+
+            # Normalisasi diagonal supaya kecepatan dash diagonal tidak
+            # lebih cepat dari dash lurus (panjang vektor tetap 1).
+            if dir_x != 0 and dir_y != 0:
+                norm = (dir_x ** 2 + dir_y ** 2) ** 0.5
+                dir_x /= norm
+                dir_y /= norm
+
+            self.dash_dir_x = dir_x
+            self.dash_dir_y = dir_y
+
+
         if self.dashing:
- 
-            dx = self.facing * self.dash_speed
- 
+
+            dx = self.dash_dir_x * self.dash_speed
+            dy = self.dash_dir_y * self.dash_speed
+
             self.dash_timer -= 1
- 
+
             if self.dash_timer <= 0:
- 
+
                 self.dashing = False
                 self.dash_timer = -self.dash_cooldown
- 
- 
+
+
         # MOVE
         if not self.dashing:
- 
-            move_left  = keys[pygame.K_a] or (mc and mc.move_left)
-            move_right = keys[pygame.K_d] or (mc and mc.move_right)
-            move_up    = keys[pygame.K_w] or (mc and mc.move_up)
-            move_down  = keys[pygame.K_s] or (mc and mc.move_down)
- 
+
             if move_left:
  
                 dx = -self.speed

@@ -126,6 +126,10 @@ class DialogBox:
         # Dipakai untuk validasi sebelum upgrade prasasti diterima Resi.
         self.player_relics: set = set()
 
+        # Flag HP penuh — di-update dari main.py setiap frame atau sebelum
+        # dialog dibuka. True = player tidak butuh healing.
+        self.player_health_full: bool = False
+
     # ---------------- CONTROL ----------------
     def open(self, dialog_tree, start_key="start", npc_portrait=None):
         """Mulai dialog baru dari sebuah dialog tree.
@@ -206,6 +210,15 @@ class DialogBox:
         chosen   = options[self.selected_index]
         next_key = chosen.get("next")
 
+        # ── Cek HP penuh sebelum masuk node healing ──────────────────────
+        # Kalau player memilih healing tapi HP sudah penuh, alihkan ke
+        # node khusus yang memberi tahu player bahwa HP-nya masih prima.
+        if next_key == "node_healing" and self.player_health_full:
+            self.current_node_key = "node_healing_full"
+            self.selected_index   = 0
+            return
+        # ─────────────────────────────────────────────────────────────────
+
         # ── Validasi kepemilikan relic sebelum upgrade ──────────────────
         # Cek apakah node tujuan punya "action" upgrade prasasti.
         # Kalau punya, tapi player belum punya relic yang diperlukan,
@@ -220,6 +233,19 @@ class DialogBox:
                 self.selected_index   = 0
                 return
         # ────────────────────────────────────────────────────────────────
+
+        # ── Hapus relic dari inventory setelah upgrade dikonfirmasi ──────
+        # Hapus relic tepat saat player menekan "Terima prasasti ini"
+        # (yaitu saat berada di node yang ber-action upgrade).
+        current_node = self._current_node()
+        if current_node:
+            current_action = current_node.get("action", "")
+            if current_action in PRASASTI_RELIC_REQUIRED:
+                relic_to_remove = PRASASTI_RELIC_REQUIRED[current_action]
+                self.player_relics.discard(relic_to_remove)
+                print(f"[DIALOG] Relic '{relic_to_remove}' dipakai — dihapus dari inventory. "
+                      f"Sisa: {self.player_relics}")
+        # ─────────────────────────────────────────────────────────────────
 
         if next_key is None:
             self.close()
@@ -346,6 +372,13 @@ RESI_DIALOG_TREE = {
             {"label": "Tutup", "next": None},
         ],
     },
+    "node_healing_full": {
+        "speaker": "Resi Abimayasa",
+        "text": "Tubuhmu masih prima, pendekar. Tirta suci ini tidak dibutuhkan — simpan tenagamu untuk pertempuran!",
+        "options": [
+            {"label": "Baik, Resi", "next": "start"},
+        ],
+    },
 
     # ── UPGRADE KEKUATAN — pilih prasasti ────────────────────────
     "node_upgrade": {
@@ -353,17 +386,11 @@ RESI_DIALOG_TREE = {
         "text": "Prasasti para Pandava tersimpan di sini. Pilih kekuatan mana yang ingin kau serap, pendekar.",
         "options": [
             {"label": "Prasasti Bima",       "next": "node_bima"},
-            {"label": "Prasasti Nakula",     "next": "node_nakula"},
+            {"label": "Prasasti Sadewa",     "next": "node_sadewa"},
             {"label": "Prasasti Arjuna",     "next": "node_arjuna"},
+            {"label": "Prasasti Nakula",     "next": "node_nakula"},
             {"label": "Prasasti Yudhistira", "next": "node_yudhistira"},
-        ],
-    },
-    "node_upgrade_2": {
-        "speaker": "Resi Abimayasa",
-        "text": "Masih ada satu prasasti lagi yang menunggumu.",
-        "options": [
-            {"label": "Prasasti Sadewa", "next": "node_sadewa"},
-            {"label": "Kembali",          "next": "start"},
+            {"label": "Kembali",             "next": "start"},
         ],
     },
 
@@ -496,9 +523,9 @@ PRASASTI_BUFFS = {
         "damage": 0,
         "speed":  +0.6,
     },
-    # Sadewa: kekuatan menengah, tanpa speed
+    # Sadewa: kekuatan menengah — lebih kuat dari Arjuna (+1), lebih lemah dari Bima (+3)
     "upgrade_strength_sadewa": {
-        "damage": +1,
+        "damage": +2,
         "speed":  0,
     },
 }
@@ -514,3 +541,425 @@ PRASASTI_RELIC_REQUIRED = {
     "upgrade_speed_yudhistira": "Batu Yudhistira",
     "upgrade_strength_sadewa":  "Batu Sadewa",
 }
+
+
+# ================= HEALING AURA EFFECT =================
+# Efek aura hijau yang muncul di atas karakter player saat mendapat healing.
+#
+# CARA PAKAI di main.py:
+#   1. Buat instance (sekali saja, saat init):
+#        from dialog_system import HealingAura
+#        healing_aura = HealingAura()
+#
+#   2. Trigger saat healing diterapkan (di apply_dialog_action):
+#        healing_aura.trigger(player.rect.centerx, player.rect.top)
+#
+#   3. Update + draw setiap frame di game loop (setelah gambar player):
+#        healing_aura.update()
+#        healing_aura.draw(screen)
+#
+#   4. Kalau player pindah posisi, update origin setiap frame juga:
+#        healing_aura.update_origin(player.rect.centerx, player.rect.top)
+
+import math
+import random
+
+class HealingAura:
+    """Efek aura hijau berputar yang muncul di atas karakter saat healing.
+
+    Aura terdiri dari dua komponen:
+    - Partikel cahaya hijau yang melayang ke atas dan memudar (fade-out)
+    - Cincin aura memudar yang mengembang di sekitar karakter
+
+    Durasi total efek: sekitar 90 frame (~1.5 detik di 60fps).
+    """
+
+    # Warna-warna aura hijau dengan variasi terang-gelap
+    _COLORS = [
+        (80,  220, 120),   # hijau sedang
+        (50,  255, 100),   # hijau terang
+        (120, 255, 160),   # hijau muda
+        (30,  200,  80),   # hijau tua
+        (180, 255, 200),   # hijau pucat / putih kehijau-hijauan
+    ]
+
+    def __init__(self):
+        self._particles  = []   # list dict per partikel
+        self._rings      = []   # list dict per cincin
+        self._origin_x   = 0
+        self._origin_y   = 0
+        self._active     = False
+
+    # ── Public API ──────────────────────────────────────────────────────
+
+    def trigger(self, cx: int, cy: int):
+        """Mulai efek aura di posisi (cx, cy) — biasanya centerx, top karakter."""
+        self._origin_x = cx
+        self._origin_y = cy
+        self._active   = True
+        self._particles.clear()
+        self._rings.clear()
+        self._spawn_burst()
+
+    def update_origin(self, cx: int, cy: int):
+        """Perbarui asal efek agar mengikuti karakter yang bergerak."""
+        self._origin_x = cx
+        self._origin_y = cy
+
+    def update(self):
+        """Panggil sekali per frame di game loop untuk memperbarui state."""
+        if not self._active:
+            return
+
+        # ── Update partikel ──
+        alive_p = []
+        for p in self._particles:
+            p["x"]     += p["vx"]
+            p["y"]     += p["vy"]
+            p["vy"]    -= 0.05             # gravitasi terbalik (melayang ke atas)
+            p["alpha"] -= p["fade"]
+            p["size"]  = max(1, p["size"] - 0.06)
+            if p["alpha"] > 0:
+                alive_p.append(p)
+        self._particles = alive_p
+
+        # Spawn partikel baru selama ada ring (efek masih berjalan)
+        if self._rings:
+            self._spawn_particles(count=2)
+
+        # ── Update cincin ──
+        alive_r = []
+        for r in self._rings:
+            r["radius"] += r["expand"]
+            r["alpha"]  -= r["fade"]
+            if r["alpha"] > 0:
+                alive_r.append(r)
+        self._rings = alive_r
+
+        # Nonaktifkan kalau semua sudah hilang
+        if not self._particles and not self._rings:
+            self._active = False
+
+    def draw(self, screen: pygame.Surface):
+        """Gambar aura ke screen. Panggil setelah gambar player agar di atas."""
+        if not self._active:
+            return
+
+        # ── Gambar cincin ──
+        for r in self._rings:
+            alpha = max(0, min(255, int(r["alpha"])))
+            if alpha == 0:
+                continue
+            color = r["color"]
+            radius = int(r["radius"])
+            if radius < 2:
+                continue
+            # Buat surface transparan, gambar lingkaran, lalu blit ke screen
+            diam = radius * 2 + 4
+            ring_surf = pygame.Surface((diam, diam), pygame.SRCALPHA)
+            pygame.draw.circle(
+                ring_surf,
+                (*color, alpha),
+                (diam // 2, diam // 2),
+                radius,
+                width=2,
+            )
+            screen.blit(ring_surf, (self._origin_x - diam // 2,
+                                    self._origin_y - diam // 2))
+
+        # ── Gambar partikel ──
+        for p in self._particles:
+            alpha = max(0, min(255, int(p["alpha"])))
+            if alpha == 0:
+                continue
+            size = max(1, int(p["size"]))
+            diam = size * 2
+            p_surf = pygame.Surface((diam, diam), pygame.SRCALPHA)
+            pygame.draw.circle(
+                p_surf,
+                (*p["color"], alpha),
+                (size, size),
+                size,
+            )
+            screen.blit(p_surf, (int(p["x"]) - size, int(p["y"]) - size))
+
+    @property
+    def is_active(self) -> bool:
+        """True selama efek masih berjalan."""
+        return self._active
+
+    # ── Internal helpers ────────────────────────────────────────────────
+
+    def _spawn_burst(self):
+        """Spawn partikel awal + 3 cincin sekaligus saat trigger dipanggil."""
+        self._spawn_particles(count=30)
+        for i in range(3):
+            delay_radius = 8 + i * 6
+            self._rings.append({
+                "radius": delay_radius,
+                "expand": 1.8 + i * 0.4,
+                "alpha":  220 - i * 40,
+                "fade":   3.5 + i * 0.5,
+                "color":  random.choice(self._COLORS),
+            })
+
+    def _spawn_particles(self, count: int = 5):
+        """Spawn sejumlah partikel acak dari titik origin."""
+        for _ in range(count):
+            angle  = random.uniform(0, math.tau)
+            speed  = random.uniform(0.4, 2.2)
+            spread = random.uniform(0, 28)     # jarak lateral dari center
+            self._particles.append({
+                "x":     self._origin_x + math.cos(angle) * spread,
+                "y":     self._origin_y + random.uniform(-5, 8),
+                "vx":    math.cos(angle) * speed * 0.4,
+                "vy":    -random.uniform(0.8, 2.5),   # arah ke atas
+                "size":  random.uniform(2.5, 5.5),
+                "alpha": random.uniform(180, 255),
+                "fade":  random.uniform(3, 7),
+                "color": random.choice(self._COLORS),
+            })
+
+
+# ================= UPGRADE AURA EFFECT =================
+# Efek aura seperti api yang muncul di sekitar karakter saat menerima upgrade prasasti.
+# Mendukung dua tema warna: emas (Bima) dan hijau (Arjuna).
+#
+# CARA PAKAI di main.py:
+#   1. Import & buat instance (sekali saja):
+#        from dialog_system import UpgradeAura
+#        upgrade_aura = UpgradeAura()
+#
+#   2. Trigger dengan warna yang sesuai (di apply_dialog_action):
+#        upgrade_aura.trigger(player.rect.centerx, player.rect.centery, theme="gold")   # Bima
+#        upgrade_aura.trigger(player.rect.centerx, player.rect.centery, theme="green")  # Arjuna
+#
+#   3. Update + draw setiap frame SETELAH player digambar:
+#        upgrade_aura.update_origin(player.rect.centerx, player.rect.centery)
+#        upgrade_aura.update()
+#        upgrade_aura.draw(screen)
+
+class UpgradeAura:
+    """Efek aura api yang mengelilingi karakter saat menerima upgrade prasasti.
+
+    Berbeda dari HealingAura yang partikelnya naik ke atas (seperti cahaya),
+    UpgradeAura mensimulasikan kobaran api — partikel bergerak naik dengan
+    turbulensi lateral (goyang kiri-kanan), ukuran besar di bawah mengecil
+    di atas, dan ada lapisan inner glow di tengah karakter.
+
+    Tema:
+        "gold"  — api emas/oranye untuk Bima (kekuatan brutal Werkudara)
+        "green" — api hijau untuk Arjuna (keseimbangan ksatria)
+    Durasi: ~2 detik (120 frame di 60fps).
+    """
+
+    _PALETTES = {
+        "gold": [
+            (255, 200,  40),   # kuning emas terang
+            (255, 140,  10),   # oranye api
+            (255, 80,    0),   # merah-oranye
+            (255, 230, 100),   # emas pucat
+            (255, 255, 160),   # putih kekuningan (ujung lidah api)
+        ],
+        "green": [
+            (60,  255, 120),   # hijau neon
+            (30,  200,  80),   # hijau tua
+            (140, 255, 180),   # hijau muda
+            (200, 255, 100),   # hijau-kuning (ujung api)
+            (80,  255, 200),   # cyan-hijau
+        ],
+    }
+
+    def __init__(self):
+        self._particles  = []
+        self._rings      = []
+        self._embers     = []   # percikan kecil yang jatuh ke bawah (ember/bara)
+        self._origin_x   = 0
+        self._origin_y   = 0
+        self._active     = False
+        self._theme      = "gold"
+        self._frame      = 0   # counter frame sejak trigger, untuk continuous spawn
+
+    # ── Public API ──────────────────────────────────────────────────────
+
+    def trigger(self, cx: int, cy: int, theme: str = "gold"):
+        """Mulai efek aura api.
+
+        cx, cy  : pusat karakter (rect.centerx, rect.centery)
+        theme   : "gold" untuk Bima, "green" untuk Arjuna
+        """
+        self._origin_x = cx
+        self._origin_y = cy
+        self._theme    = theme if theme in self._PALETTES else "gold"
+        self._active   = True
+        self._frame    = 0
+        self._particles.clear()
+        self._rings.clear()
+        self._embers.clear()
+        self._spawn_burst()
+
+    def update_origin(self, cx: int, cy: int):
+        self._origin_x = cx
+        self._origin_y = cy
+
+    def update(self):
+        if not self._active:
+            return
+
+        self._frame += 1
+        colors = self._PALETTES[self._theme]
+
+        # Continuous spawn selama efek berlangsung (makin lama makin sedikit)
+        if self._frame < 80:
+            self._spawn_fire_particles(count=4, colors=colors)
+        if self._frame < 60 and self._frame % 8 == 0:
+            self._spawn_ring(colors)
+        if self._frame % 12 == 0 and self._frame < 100:
+            self._spawn_ember(colors)
+
+        # ── Update partikel api ──
+        alive_p = []
+        for p in self._particles:
+            p["x"]  += p["vx"] + math.sin(p["phase"] + self._frame * 0.18) * 0.5
+            p["y"]  += p["vy"]
+            p["vy"] -= 0.08               # naik lebih cepat dari HealingAura
+            p["alpha"] -= p["fade"]
+            p["size"]  = max(0.5, p["size"] - 0.12)  # mengecil lebih cepat (lidah api)
+            p["phase"] += 0.2
+            if p["alpha"] > 0:
+                alive_p.append(p)
+        self._particles = alive_p
+
+        # ── Update cincin ──
+        alive_r = []
+        for r in self._rings:
+            r["radius"] += r["expand"]
+            r["alpha"]  -= r["fade"]
+            if r["alpha"] > 0:
+                alive_r.append(r)
+        self._rings = alive_r
+
+        # ── Update ember (percikan jatuh) ──
+        alive_e = []
+        for e in self._embers:
+            e["x"]     += e["vx"]
+            e["y"]     += e["vy"]
+            e["vy"]    += 0.15            # gravitasi normal (jatuh ke bawah)
+            e["alpha"] -= e["fade"]
+            if e["alpha"] > 0:
+                alive_e.append(e)
+        self._embers = alive_e
+
+        if not self._particles and not self._rings and not self._embers:
+            self._active = False
+
+    def draw(self, screen: pygame.Surface):
+        if not self._active:
+            return
+
+        # ── Gambar cincin ──
+        for r in self._rings:
+            alpha = max(0, min(255, int(r["alpha"])))
+            if alpha == 0:
+                continue
+            radius = int(r["radius"])
+            if radius < 2:
+                continue
+            diam = radius * 2 + 4
+            ring_surf = pygame.Surface((diam, diam), pygame.SRCALPHA)
+            pygame.draw.circle(
+                ring_surf,
+                (*r["color"], alpha),
+                (diam // 2, diam // 2),
+                radius,
+                width=3,
+            )
+            screen.blit(ring_surf, (self._origin_x - diam // 2,
+                                    self._origin_y - diam // 2))
+
+        # ── Gambar partikel api ──
+        for p in self._particles:
+            alpha = max(0, min(255, int(p["alpha"])))
+            if alpha == 0:
+                continue
+            size = max(1, int(p["size"]))
+            diam = size * 2
+            p_surf = pygame.Surface((diam, diam), pygame.SRCALPHA)
+            pygame.draw.circle(p_surf, (*p["color"], alpha), (size, size), size)
+            screen.blit(p_surf, (int(p["x"]) - size, int(p["y"]) - size))
+
+        # ── Gambar ember ──
+        for e in self._embers:
+            alpha = max(0, min(255, int(e["alpha"])))
+            if alpha == 0:
+                continue
+            size = max(1, int(e["size"]))
+            diam = size * 2
+            e_surf = pygame.Surface((diam, diam), pygame.SRCALPHA)
+            pygame.draw.circle(e_surf, (*e["color"], alpha), (size, size), size)
+            screen.blit(e_surf, (int(e["x"]) - size, int(e["y"]) - size))
+
+    @property
+    def is_active(self) -> bool:
+        return self._active
+
+    # ── Internal helpers ────────────────────────────────────────────────
+
+    def _spawn_burst(self):
+        """Burst awal: banyak partikel + 2 cincin eksplosif."""
+        colors = self._PALETTES[self._theme]
+        self._spawn_fire_particles(count=40, colors=colors)
+        for i in range(2):
+            self._rings.append({
+                "radius": 10 + i * 8,
+                "expand": 2.5 + i * 0.6,
+                "alpha":  240 - i * 50,
+                "fade":   4.0 + i * 0.8,
+                "color":  random.choice(colors),
+            })
+        # Ember burst awal
+        self._spawn_ember(colors, count=8)
+
+    def _spawn_fire_particles(self, count: int, colors: list):
+        """Partikel api yang muncul dari sekeliling karakter."""
+        for _ in range(count):
+            angle  = random.uniform(0, math.tau)
+            spread = random.uniform(10, 36)   # radius dari center karakter
+            # Partikel muncul di sepanjang tubuh karakter (bukan cuma di atas)
+            offset_y = random.uniform(-20, 20)
+            self._particles.append({
+                "x":     self._origin_x + math.cos(angle) * spread,
+                "y":     self._origin_y + offset_y,
+                "vx":    math.cos(angle) * random.uniform(0.2, 1.0),
+                "vy":    -random.uniform(1.5, 3.5),   # naik cepat
+                "size":  random.uniform(3.0, 7.0),    # lebih besar dari healing
+                "alpha": random.uniform(200, 255),
+                "fade":  random.uniform(4, 9),
+                "color": random.choice(colors),
+                "phase": random.uniform(0, math.tau),  # fase turbulensi lateral
+            })
+
+    def _spawn_ring(self, colors: list):
+        """Cincin aura baru yang mengembang."""
+        self._rings.append({
+            "radius": random.uniform(8, 18),
+            "expand": random.uniform(1.5, 2.8),
+            "alpha":  random.uniform(160, 220),
+            "fade":   random.uniform(5, 9),
+            "color":  random.choice(colors),
+        })
+
+    def _spawn_ember(self, colors: list, count: int = 3):
+        """Percikan kecil yang terlempar ke atas lalu jatuh (efek bara api)."""
+        for _ in range(count):
+            angle = random.uniform(0, math.tau)
+            self._embers.append({
+                "x":     self._origin_x + math.cos(angle) * random.uniform(5, 20),
+                "y":     self._origin_y + random.uniform(-15, 5),
+                "vx":    math.cos(angle) * random.uniform(1.0, 3.0),
+                "vy":    -random.uniform(2.0, 4.5),
+                "size":  random.uniform(1.5, 3.0),
+                "alpha": random.uniform(200, 255),
+                "fade":  random.uniform(3, 6),
+                "color": random.choice(colors),
+            })

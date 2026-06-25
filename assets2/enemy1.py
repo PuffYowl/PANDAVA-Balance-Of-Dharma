@@ -91,6 +91,12 @@ class Enemy(pygame.sprite.Sprite):
         # RESPAWN
         self.respawn_timer = 0
 
+        # Flag one-shot: True selama SATU frame setelah musuh ini mati.
+        # main.py bisa cek flag ini (lalu reset ke False) untuk nge-trigger
+        # reward seperti +1 water di HUD, tanpa enemy perlu tahu apa-apa
+        # soal sistem water/HUD itu sendiri.
+        self.just_died = False
+
         self.facing = 1
 
     # ================= AI =================
@@ -173,6 +179,7 @@ class Enemy(pygame.sprite.Sprite):
         self.frame_index = 0
         self.respawn_timer = 120
         self.hit_flash_timer = 0
+        self.just_died = True   # main.py akan baca lalu reset flag ini
 
     def respawn(self):
         self.health = self.max_health

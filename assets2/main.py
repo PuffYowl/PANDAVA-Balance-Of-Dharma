@@ -12,7 +12,7 @@ from enemy1 import Enemy
 from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
-from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED
+from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura
 from player_hud import PlayerHUD, stamina_ratio_from_dash
 pygame.init() 
 
@@ -27,6 +27,7 @@ clock = pygame.time.Clock()
 # Set mobile_controls.visible = False to hide on desktop builds.
 mobile_controls = MobileControls(WIDTH, HEIGHT)
 dialog_box = DialogBox(WIDTH, HEIGHT)
+healing_aura = HealingAura()
 player_hud = PlayerHUD()
 FPS = 60
 
@@ -951,6 +952,7 @@ def apply_dialog_action(action_key):
     # Healing — pulihkan HP penuh
     if buff.get("heal_full"):
         player.health = player.max_health
+        healing_aura.trigger(player.rect.centerx, player.rect.top)
         print(f"[DIALOG ACTION] Healing: HP dipulihkan ke {player.max_health}")
         return
 
@@ -1208,6 +1210,16 @@ def game_loop():
                     enemy.take_damage(player.facing, player.damage)
                     arrow.kill()
 
+        # ================= REWARD: +1 WATER SAAT MUSUH MATI =================
+        # Dicek SETELAH semua sumber damage (melee + arrow) di atas, supaya
+        # tidak peduli enemy mati lewat cara apa. just_died adalah flag
+        # one-shot dari enemy1.py/enemy2.py — begitu kebaca di sini langsung
+        # direset, jadi water_count cuma nambah sekali per kematian.
+        for enemy in enemies:
+            if getattr(enemy, "just_died", False):
+                water_count += 1
+                enemy.just_died = False
+
         # ================= ENEMY ATTACK =================
         for enemy in enemies:
             atk = enemy.get_attack_hitbox()
@@ -1343,6 +1355,11 @@ def game_loop():
         draw_portal()
 
         player.draw(screen)
+
+        # Aura hijau healing — update posisi ke player, lalu update & gambar
+        healing_aura.update_origin(player.rect.centerx, player.rect.top)
+        healing_aura.update()
+        healing_aura.draw(screen)
 
         arrows.draw(screen)
 
