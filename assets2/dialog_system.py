@@ -130,6 +130,11 @@ class DialogBox:
         # dialog dibuka. True = player tidak butuh healing.
         self.player_health_full: bool = False
 
+        # Referensi ke HonorSystem — di-set dari main.py setelah honor_system
+        # dibuat. Dipakai untuk menampilkan honor bar di dalam dialog box dan
+        # untuk validasi pilihan dharma/adharma.
+        self.honor_system = None
+
     # ---------------- CONTROL ----------------
     def open(self, dialog_tree, start_key="start", npc_portrait=None):
         """Mulai dialog baru dari sebuah dialog tree.
@@ -210,6 +215,14 @@ class DialogBox:
         chosen   = options[self.selected_index]
         next_key = chosen.get("next")
 
+        # ── Terapkan perubahan honor jika pilihan punya honor_tag ────────
+        honor_tag = chosen.get("honor_tag", "")
+        if honor_tag and self.honor_system is not None:
+            delta = chosen.get("honor_delta", 0)
+            self.honor_system.change(delta)
+            print(f"[HONOR] {honor_tag}: {delta:+d} → total {self.honor_system.value}")
+        # ─────────────────────────────────────────────────────────────────
+
         # ── Cek HP penuh sebelum masuk node healing ──────────────────────
         # Kalau player memilih healing tapi HP sudah penuh, alihkan ke
         # node khusus yang memberi tahu player bahwa HP-nya masih prima.
@@ -266,21 +279,18 @@ class DialogBox:
         text    = node.get("text", "")
         options = node.get("options", [])
 
-        # ---- Layout ----
-        box_w = self.screen_w - 80
-        box_h = 170
-        box_x = 40
-        box_y = self.screen_h - box_h - 30
+        # ---- Layout (lebih besar dari versi lama) ----
+        box_w = self.screen_w - 60
+        box_h = 230                          # naik dari 170 → 230
+        box_x = 30
+        box_y = self.screen_h - box_h - 20
 
-        # ---- NPC portrait (melayang DI ATAS kotak dialog, terpisah dari
-        # portrait player di dalam box). Digambar SEBELUM panel box supaya
-        # tepi bawahnya sedikit tertutup box — kesannya "berdiri di depan"
-        # box, bukan sekadar nempel di atasnya. ----
+        # ---- NPC portrait (melayang DI ATAS kotak dialog) ----
         npc_portrait = _load_npc_portrait(self.npc_portrait_path, self.npc_portrait_height)
         if npc_portrait is not None:
             npc_w, npc_h = npc_portrait.get_size()
             npc_x = box_x + 24
-            npc_y = box_y - npc_h + 28  # naik ke atas box, overlap dikit ke box
+            npc_y = box_y - npc_h + 28
             screen.blit(npc_portrait, (npc_x, npc_y))
 
         # ---- Background panel ----
@@ -289,36 +299,70 @@ class DialogBox:
         screen.blit(panel, (box_x, box_y))
         pygame.draw.rect(screen, GOLD, (box_x, box_y, box_w, box_h), 2, border_radius=8)
 
-        # ---- Portrait (otomatis ikut karakter aktif player) ----
-        char_info = get_current_character()
-        portrait  = char_info["portrait"]
+        # ---- Portrait player (otomatis ikut karakter aktif) ----
+        char_info  = get_current_character()
+        portrait   = char_info["portrait"]
         portrait_x = box_x + 16
         portrait_y = box_y + 16
         screen.blit(portrait, (portrait_x, portrait_y))
-        pygame.draw.rect(screen, WHITE, (portrait_x, portrait_y, portrait.get_width(), portrait.get_height()), 2, border_radius=8)
+        pygame.draw.rect(screen, WHITE,
+                         (portrait_x, portrait_y,
+                          portrait.get_width(), portrait.get_height()),
+                         2, border_radius=8)
 
+        # ---- Area teks (kiri-tengah) ----
         text_area_x = portrait_x + portrait.get_width() + 20
-        text_area_w = box_w - (portrait.get_width() + 16 + 20) - 220  # sisakan ruang utk opsi di kanan
+        opt_col_w   = 230                    # lebar kolom opsi kanan
+        text_area_w = box_w - (portrait.get_width() + 16 + 20) - opt_col_w - 10
 
         # ---- Speaker name ----
         name_surf = self.font_name.render(speaker, True, GOLD)
-        screen.blit(name_surf, (text_area_x, box_y + 14))
+        screen.blit(name_surf, (text_area_x, box_y + 12))
 
-        # ---- Dialog text (wrap manual sederhana) ----
+        # ---- Dialog text (wrap — max 5 baris sekarang) ----
         wrapped_lines = self._wrap_text(text, self.font_text, text_area_w)
-        for i, line in enumerate(wrapped_lines[:3]):  # max 3 baris biar tidak overflow
+        for i, line in enumerate(wrapped_lines[:5]):
             line_surf = self.font_text.render(line, True, WHITE)
-            screen.blit(line_surf, (text_area_x, box_y + 48 + i * 26))
+            screen.blit(line_surf, (text_area_x, box_y + 44 + i * 28))
 
-        # ---- Options (kanan) ----
-        opt_x = box_x + box_w - 210
-        opt_y = box_y + 16
+        # ---- Honor bar (di dalam box, bawah area teks) ----
+        if hasattr(self, "honor_system") and self.honor_system is not None:
+            self.honor_system.draw_bar(screen, text_area_x, box_y + box_h - 42, text_area_w)
+
+        # ---- Options (kolom kanan) ----
+        # Label di-word-wrap otomatis kalau kepanjangan untuk kolom ini,
+        # supaya tidak pernah terpotong di luar kotak/layar — sebelumnya
+        # opsi hanya dirender 1 baris tanpa wrap sama sekali.
+        opt_x       = box_x + box_w - opt_col_w - 8
+        cursor_y    = box_y + 12
+        line_h      = 22
+        option_gap  = 8   # jarak ekstra antar opsi (selain tinggi baris terakhir)
         for i, opt in enumerate(options):
             is_selected = (i == self.selected_index)
-            color = GREEN if is_selected else WHITE
+            # Warna opsi: dharma=biru, adharma=oranye, lainnya=putih/hijau
+            tag = opt.get("honor_tag", "")
+            if tag == "dharma":
+                base_color = (100, 180, 255)
+                sel_color  = (160, 220, 255)
+            elif tag == "adharma":
+                base_color = (255, 140, 60)
+                sel_color  = (255, 200, 80)
+            else:
+                base_color = WHITE
+                sel_color  = GREEN
+            color  = sel_color if is_selected else base_color
             prefix = "➤ " if is_selected else "   "
-            opt_surf = self.font_opt.render(prefix + opt["label"], True, color)
-            screen.blit(opt_surf, (opt_x, opt_y + i * 30))
+
+            prefix_w   = self.font_opt.size(prefix)[0]
+            wrap_width = max(40, opt_col_w - prefix_w - 4)
+            wrapped    = self._wrap_text(opt["label"], self.font_opt, wrap_width) or [""]
+
+            for li, line in enumerate(wrapped):
+                line_text = (prefix if li == 0 else "   ") + line
+                line_surf = self.font_opt.render(line_text, True, color)
+                screen.blit(line_surf, (opt_x, cursor_y))
+                cursor_y += line_h
+            cursor_y += option_gap
 
 
     @staticmethod
@@ -349,9 +393,9 @@ RESI_DIALOG_TREE = {
         "speaker": "Resi Abimayasa",
         "text": "Wahai pendekar Pandava... cahayamu masih menyala. Apa yang kau butuhkan dari Sang Resi?",
         "options": [
-            {"label": "Healing",           "next": "node_healing"},
-            {"label": "Upgrade Kekuatan",  "next": "node_upgrade"},
-            {"label": "Pergi",             "next": None},
+            {"label": "Healing",                         "next": "node_healing"},
+            {"label": "Upgrade Kekuatan",                "next": "node_upgrade_intent"},
+            {"label": "Pergi",                           "next": None},
         ],
     },
 
@@ -378,6 +422,36 @@ RESI_DIALOG_TREE = {
         "options": [
             {"label": "Baik, Resi", "next": "start"},
         ],
+    },
+
+    # ── UPGRADE KEKUATAN — Resi menanyakan niat player ───────────
+    "node_upgrade_intent": {
+        "speaker": "Resi Abimayasa",
+        "text": "Untuk apa kamu gunakan prasasti ini, pendekar?",
+        "options": [
+            {"label": "Melindungi yang lemah tanpa pamrih",
+             "next": "node_upgrade_intent_baik",
+             "honor_tag": "dharma", "honor_delta": +15},
+            {"label": "Menghancurkan musuh tanpa ampun",
+             "next": "node_upgrade_intent_jahat",
+             "honor_tag": "adharma", "honor_delta": -15},
+        ],
+    },
+    "node_upgrade_intent_baik": {
+        "speaker": "Resi Abimayasa",
+        "text": "Niat yang mulia, pendekar. Semoga kekuatan ini menjadi pelindung bagi yang membutuhkan, bukan alat penindas.",
+        "options": [
+            {"label": "Lanjutkan", "next": "node_upgrade"},
+        ],
+        "action": "honor_dharma",
+    },
+    "node_upgrade_intent_jahat": {
+        "speaker": "Resi Abimayasa",
+        "text": "Aku merasakan kebencian membara dalam hatimu... Prasasti ini tidak memilih siapa pemiliknya. Pergunakanlah, jika itu jalan yang kau pilih.",
+        "options": [
+            {"label": "Lanjutkan", "next": "node_upgrade"},
+        ],
+        "action": "honor_adharma",
     },
 
     # ── UPGRADE KEKUATAN — pilih prasasti ────────────────────────
@@ -528,6 +602,9 @@ PRASASTI_BUFFS = {
         "damage": +2,
         "speed":  0,
     },
+    # Honor actions — tidak mengubah stat, hanya honor (diproses di dialog_system)
+    "honor_dharma":  {"honor_only": True},
+    "honor_adharma": {"honor_only": True},
 }
 
 # ================= PRASASTI → NAMA RELIC =================
@@ -541,6 +618,169 @@ PRASASTI_RELIC_REQUIRED = {
     "upgrade_speed_yudhistira": "Batu Yudhistira",
     "upgrade_strength_sadewa":  "Batu Sadewa",
 }
+
+
+# ================= HONOR SYSTEM =================
+# Sistem honor dua sisi: Dharma (kebaikan) vs Adharma (keburukan).
+# Nilai mulai di 0 (seimbang), bergerak -100 (adharma penuh) sampai +100 (dharma penuh).
+#
+# CARA PAKAI di main.py:
+#   from dialog_system import HonorSystem
+#   honor_system = HonorSystem()
+#   dialog_box.honor_system = honor_system   # hubungkan ke dialog box
+#
+#   # Di game loop, gambar HUD honor:
+#   honor_system.draw_hud(screen, x, y)
+
+class HonorSystem:
+    """Sistem honor dua sisi — Dharma (+) vs Adharma (−).
+
+    Nilai awal 0 (seimbang). Setiap pilihan dialog dharma/adharma
+    mengubah nilai ini. Nilai di-clamp ke [-100, +100].
+
+    Level honor (untuk referensi di luar):
+        +76 .. +100 : Dharma Agung   — cahaya penuh
+        +26 .. +75  : Dharma         — jalan terang
+         -25 .. +25 : Seimbang       — neraca bergetar
+        -75 .. -26  : Adharma        — bayang-bayang
+       -100 .. -76  : Adharma Gelap  — kegelapan penuh
+    """
+
+    # Warna gradien bar: adharma (kiri) → tengah → dharma (kanan)
+    _COLOR_ADHARMA = (180,  40,  40)   # merah gelap
+    _COLOR_NEUTRAL = (180, 150,  60)   # emas redup (tengah)
+    _COLOR_DHARMA  = (60,  160, 255)   # biru langit
+
+    _LEVEL_LABELS = [
+        (+76,  "Dharma Agung",  (120, 200, 255)),
+        (+26,  "Dharma",        (80,  160, 255)),
+        (-25,  "Seimbang",      (200, 180,  80)),
+        (-75,  "Adharma",       (230, 110,  50)),
+        (-101, "Adharma Gelap", (200,  40,  40)),
+    ]
+
+    def __init__(self, initial: int = 0):
+        self._value = max(-100, min(100, initial))
+        self._font  = None   # di-init saat draw pertama kali (lazy, butuh pygame.init)
+
+    # ── Public API ──────────────────────────────────────────────────────
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def change(self, delta: int):
+        """Ubah nilai honor. delta positif = dharma, negatif = adharma."""
+        self._value = max(-100, min(100, self._value + delta))
+
+    def reset(self):
+        self._value = 0
+
+    @property
+    def level_label(self) -> str:
+        for threshold, label, _ in self._LEVEL_LABELS:
+            if self._value >= threshold:
+                return label
+        return "Adharma Gelap"
+
+    @property
+    def level_color(self):
+        for threshold, _, color in self._LEVEL_LABELS:
+            if self._value >= threshold:
+                return color
+        return self._COLOR_ADHARMA
+
+    def draw_hud(self, screen: pygame.Surface, x: int, y: int, width: int = 220):
+        """Gambar honor bar lengkap sebagai HUD (di luar dialog box).
+
+        x, y  : pojok kiri atas panel
+        width : lebar total panel (default 220px)
+        """
+        self._ensure_font()
+        bar_h  = 14
+        pad    = 6
+        panel_h = 54
+
+        # Panel latar
+        panel = pygame.Surface((width, panel_h), pygame.SRCALPHA)
+        panel.fill((10, 8, 20, 190))
+        screen.blit(panel, (x, y))
+        pygame.draw.rect(screen, (70, 60, 80), (x, y, width, panel_h), 1, border_radius=6)
+
+        # Label "DHARMA ↔ ADHARMA"
+        lbl = self._font.render("DHARMA  ↔  ADHARMA", True, (160, 150, 180))
+        screen.blit(lbl, (x + pad, y + pad))
+
+        # Bar
+        bar_x = x + pad
+        bar_y = y + pad + 18
+        bar_w = width - pad * 2
+
+        # Latar bar abu
+        pygame.draw.rect(screen, (40, 35, 50), (bar_x, bar_y, bar_w, bar_h), border_radius=4)
+
+        # Isi bar (dari tengah ke kiri/kanan tergantung nilai)
+        mid = bar_x + bar_w // 2
+        ratio = abs(self._value) / 100.0
+        fill_w = int((bar_w // 2) * ratio)
+
+        if self._value >= 0:
+            # Dharma: isi dari tengah ke kanan — biru
+            pygame.draw.rect(screen, self._COLOR_DHARMA,
+                             (mid, bar_y, fill_w, bar_h), border_radius=4)
+        else:
+            # Adharma: isi dari tengah ke kiri — merah
+            pygame.draw.rect(screen, self._COLOR_ADHARMA,
+                             (mid - fill_w, bar_y, fill_w, bar_h), border_radius=4)
+
+        # Garis tengah putih
+        pygame.draw.line(screen, (255, 255, 255), (mid, bar_y - 1), (mid, bar_y + bar_h), 2)
+        pygame.draw.rect(screen, (80, 70, 90), (bar_x, bar_y, bar_w, bar_h), 1, border_radius=4)
+
+        # Level label
+        lv_surf = self._font.render(self.level_label, True, self.level_color)
+        screen.blit(lv_surf, (x + pad, bar_y + bar_h + 4))
+
+        # Nilai numerik di kanan
+        val_surf = self._font.render(f"{self._value:+d}", True, self.level_color)
+        screen.blit(val_surf, (x + width - val_surf.get_width() - pad, bar_y + bar_h + 4))
+
+    def draw_bar(self, screen: pygame.Surface, x: int, y: int, width: int = 300):
+        """Bar honor mini untuk ditampilkan di dalam dialog box.
+        Lebih compact dari draw_hud — hanya bar + label level."""
+        self._ensure_font()
+        bar_h = 10
+        pad   = 4
+
+        pygame.draw.rect(screen, (30, 25, 40), (x, y, width, bar_h), border_radius=3)
+
+        mid   = x + width // 2
+        ratio = abs(self._value) / 100.0
+        fill  = int((width // 2) * ratio)
+
+        if self._value >= 0:
+            pygame.draw.rect(screen, self._COLOR_DHARMA,
+                             (mid, y, fill, bar_h), border_radius=3)
+        else:
+            pygame.draw.rect(screen, self._COLOR_ADHARMA,
+                             (mid - fill, y, fill, bar_h), border_radius=3)
+
+        pygame.draw.line(screen, WHITE, (mid, y - 1), (mid, y + bar_h), 1)
+        pygame.draw.rect(screen, (70, 60, 80), (x, y, width, bar_h), 1, border_radius=3)
+
+        lv_surf = self._font.render(
+            f"Honor: {self.level_label}  ({self._value:+d})", True, self.level_color)
+        screen.blit(lv_surf, (x, y + bar_h + 3))
+
+    # ── Internal ────────────────────────────────────────────────────────
+
+    def _ensure_font(self):
+        if self._font is None:
+            try:
+                self._font = pygame.font.Font(
+                    "assets2/font/A Friend In Deed.otf", 14)
+            except Exception:
+                self._font = pygame.font.SysFont("Arial", 13)
 
 
 # ================= HEALING AURA EFFECT =================
@@ -740,18 +980,6 @@ class HealingAura:
 #        upgrade_aura.draw(screen)
 
 class UpgradeAura:
-    """Efek aura api yang mengelilingi karakter saat menerima upgrade prasasti.
-
-    Berbeda dari HealingAura yang partikelnya naik ke atas (seperti cahaya),
-    UpgradeAura mensimulasikan kobaran api — partikel bergerak naik dengan
-    turbulensi lateral (goyang kiri-kanan), ukuran besar di bawah mengecil
-    di atas, dan ada lapisan inner glow di tengah karakter.
-
-    Tema:
-        "gold"  — api emas/oranye untuk Bima (kekuatan brutal Werkudara)
-        "green" — api hijau untuk Arjuna (keseimbangan ksatria)
-    Durasi: ~2 detik (120 frame di 60fps).
-    """
 
     _PALETTES = {
         "gold": [

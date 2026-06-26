@@ -12,7 +12,7 @@ from enemy1 import Enemy
 from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
-from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura
+from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura, UpgradeAura, HonorSystem
 from player_hud import PlayerHUD, stamina_ratio_from_dash
 pygame.init() 
 
@@ -28,6 +28,9 @@ clock = pygame.time.Clock()
 mobile_controls = MobileControls(WIDTH, HEIGHT)
 dialog_box = DialogBox(WIDTH, HEIGHT)
 healing_aura = HealingAura()
+upgrade_aura = UpgradeAura()
+honor_system = HonorSystem(initial=0)      # mulai seimbang (0)
+dialog_box.honor_system = honor_system     # honor bar muncul di dalam dialog
 player_hud = PlayerHUD()
 FPS = 60
 
@@ -369,23 +372,588 @@ def button(text, center, mouse_pos):
     screen.blit(surf, rect)
     return rect
 
+
+def _draw_menu_btn(surface, font, text, rect, hovered):
+    """Tombol menu utama bergaya panel semi-transparan + teks."""
+    idle_color  = (20,  16,  30, 180)
+    hover_color = (60,  44,  90, 220)
+    border_idle = (100, 80, 140)
+    border_hov  = (255, 210, 60)
+
+    panel = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+    panel.fill(hover_color if hovered else idle_color)
+    surface.blit(panel, rect.topleft)
+    pygame.draw.rect(surface, border_hov if hovered else border_idle,
+                     rect, 2, border_radius=8)
+
+    label = font.render(text, True, GOLD if hovered else WHITE)
+    surface.blit(label, label.get_rect(center=rect.center))
+    return rect
+
+
 # ================= MAIN MENU =================
 def main_menu():
     global state
+    menu_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 56)
+    sub_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 34)
+
+    btn_w, btn_h = 260, 62
+    cx = WIDTH // 2
+    play_rect     = pygame.Rect(cx - btn_w // 2, 240, btn_w, btn_h)
+    tutorial_rect = pygame.Rect(cx - btn_w // 2, 318, btn_w, btn_h)
+    index_rect    = pygame.Rect(cx - btn_w // 2, 396, btn_w, btn_h)
+
     while state == "menu":
         clock.tick(FPS)
         mouse_pos = pygame.mouse.get_pos()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if play_btn.collidepoint(mouse_pos):
-                    state = "select"
+
+            # ── Mouse ──────────────────────────────────────────────
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if play_rect.collidepoint(mouse_pos):
+                    state = "select"; return
+                if tutorial_rect.collidepoint(mouse_pos):
+                    tutorial_screen(); return
+                if index_rect.collidepoint(mouse_pos):
+                    index_screen(); return
+
+            # ── Touch ──────────────────────────────────────────────
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH)
+                ty = int(event.y * HEIGHT)
+                if play_rect.collidepoint(tx, ty):
+                    state = "select"; return
+                if tutorial_rect.collidepoint(tx, ty):
+                    tutorial_screen(); return
+                if index_rect.collidepoint(tx, ty):
+                    index_screen(); return
+
         screen.blit(bg_menu, (0, 0))
-        play_btn = button("PLAY", (WIDTH // 2, 270), mouse_pos)
+        _draw_menu_btn(screen, sub_font, "▶  BERMAIN",  play_rect,
+                       play_rect.collidepoint(mouse_pos))
+        _draw_menu_btn(screen, sub_font, "?  TUTORIAL", tutorial_rect,
+                       tutorial_rect.collidepoint(mouse_pos))
+        _draw_menu_btn(screen, sub_font, "✦  INDEX",    index_rect,
+                       index_rect.collidepoint(mouse_pos))
         pygame.display.flip()
 
-# ================= CHARACTER SELECT =================
+
+# ================= TUTORIAL SCREEN =================
+def tutorial_screen():
+    """Layar tutorial — menjelaskan kontrol dasar dan mekanisme game."""
+    tf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 38)
+    sf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
+    hf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 18)
+
+    lines = [
+        ("PANDAVA — BALANCE OF DHARMA", True),
+        ("", False),
+        ("KONTROL", True),
+        ("  Gerak   :  WASD / Arrow Keys / Joystick kiri", False),
+        ("  Serang  :  J / Tombol ATK", False),
+        ("  Dash    :  K / Tombol DASH", False),
+        ("  Interaksi: E (dekat portal / relic / Resi)", False),
+        ("  Jeda    :  ESC / Tombol Pause (atas tengah)", False),
+        ("", False),
+        ("MEKANIK", True),
+        ("  • Fase Bertarung — kalahkan musuh hingga timer habis", False),
+        ("  • Fase Jelajah   — portal terbuka, temukan relic & Resi", False),
+        ("  • Ambil Relic (Batu) → tukar ke Resi Abimayasa", False),
+        ("  • Resi bisa mengupgrade stat atau memulihkan HP", False),
+        ("  • HP habis = Game Over", False),
+        ("", False),
+        ("TIPS", True),
+        ("  • Dash untuk menghindari serangan musuh", False),
+        ("  • Upgrade damage Bima atau speed Nakula lebih dulu", False),
+        ("  • Resi hanya bisa menyembuhkan jika HP tidak penuh", False),
+    ]
+
+    back_w, back_h = 180, 50
+    back_rect = pygame.Rect(WIDTH // 2 - back_w // 2, HEIGHT - back_h - 14,
+                            back_w, back_h)
+
+    running = True
+    while running:
+        clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                running = False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if back_rect.collidepoint(mouse_pos):
+                    running = False
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH); ty = int(event.y * HEIGHT)
+                if back_rect.collidepoint(tx, ty):
+                    running = False
+
+        # Background gelap bergaya scroll lontar
+        screen.fill((18, 12, 28))
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 80))
+        screen.blit(overlay, (0, 0))
+
+        # Panel konten
+        panel_rect = pygame.Rect(40, 20, WIDTH - 80, HEIGHT - 90)
+        panel_surf = pygame.Surface((panel_rect.w, panel_rect.h), pygame.SRCALPHA)
+        panel_surf.fill((20, 14, 36, 200))
+        screen.blit(panel_surf, panel_rect.topleft)
+        pygame.draw.rect(screen, (100, 80, 140), panel_rect, 2, border_radius=10)
+
+        y = 30
+        for text, is_header in lines:
+            if is_header:
+                surf = tf.render(text, True, GOLD)
+            else:
+                surf = sf.render(text, True, (210, 200, 230))
+            screen.blit(surf, (60, y))
+            y += 36 if is_header else 26
+
+        # Tombol back
+        hov = back_rect.collidepoint(mouse_pos)
+        _draw_menu_btn(screen, sf, "◄  Kembali", back_rect, hov)
+        pygame.display.flip()
+
+
+# ================= INDEX SCREEN =================
+# Data cerita Pandava Lima untuk layar Index
+_PANDAVA_LORE = [
+    {
+        "name":  "Arjuna",
+        "title": "Sang Pemanah Tanpa Tanding",
+        "card":  None,   # diisi dari card_arjuna setelah aset dimuat
+        "color": (80, 160, 255),   # biru langit
+        "lore":  [
+            "Arjuna adalah putra ketiga Pandu dari ibu Kunti,",
+            "lahir dari berkah Dewa Indra, raja para dewa.",
+            "",
+            "Ia dikenal sebagai pemanah terbaik di dunia,",
+            "murid kesayangan Resi Drona yang melebihi semua",
+            "ksatria semasanya dalam ketepatan dan konsentrasi.",
+            "",
+            "Dalam Perang Bharatayuddha, Arjuna menjadi",
+            "pilar utama pasukan Pandava. Saat goyah melihat",
+            "keluarga di pihak musuh, Krishna menurunkan",
+            "Bhagavad Gita — ajaran dharma untuk jiwa yang bimbang.",
+            "",
+            "Senjata andalannya: Gandiva — busur pemberian dewa,",
+            "dan panah sakti Pasupati dari Dewa Siwa sendiri.",
+        ],
+    },
+    {
+        "name":  "Bima",
+        "title": "Angin Kencang Werkudara",
+        "card":  None,   # diisi dari card_bima
+        "color": (220, 100, 40),   # oranye api
+        "lore":  [
+            "Bima atau Werkudara adalah putra kedua Pandu,",
+            "lahir dari angin Dewa Bayu — sumber kekuatannya",
+            "yang luar biasa dan tak tertandingi.",
+            "",
+            "Tubuhnya besar, tenaganya setara seribu gajah.",
+            "Ia mampu membawa senjata Gada (gada besi) yang",
+            "tidak sanggup diangkat ksatria lain.",
+            "",
+            "Bima adalah pejuang terdepan Pandava — tidak kenal",
+            "takut, tidak kenal mundur. Dendamnya kepada Duryodana",
+            "dan Dursasana berakhir di medan Kurukshetra.",
+            "",
+            "Anak Bima yang terkenal: Gatotkaca, raksasa sakti",
+            "yang gugur demi melindungi ayahnya dan Pandava.",
+        ],
+    },
+    {
+        "name":  "Yudhistira",
+        "title": "Raja Dharma yang Teguh",
+        "card":  None,   # diisi dari card_yudhistira
+        "color": (80, 220, 140),   # hijau kebijaksanaan
+        "lore":  [
+            "Yudhistira adalah putra sulung Pandu dari Kunti,",
+            "lahir dari berkah Dewa Yama — dewa keadilan dan dharma.",
+            "",
+            "Ia dikenal sebagai penjelmaan Dharma: jujur mutlak,",
+            "bijaksana, dan tidak pernah berbohong seumur hidupnya",
+            "— kecuali satu kali, demi memenangkan perang suci.",
+            "",
+            "Sebagai raja Hastinapura setelah Bharatayuddha,",
+            "pemerintahannya membawa era keemasan dan kedamaian.",
+            "",
+            "Senjata andalannya: Tombak Kaladanda — senjata",
+            "keadilan yang hanya efektif di tangan yang benar.",
+            "Kekuatannya bukan fisik, melainkan kebijaksanaan",
+            "dan keteguhan hati dalam menghadapi segala cobaan.",
+        ],
+    },
+    {
+        "name":  "Nakula",
+        "title": "Sang Pendekar Tampan Mahir Senjata",
+        "card":  None,   # fallback ke card_yudhistira (belum ada card khusus)
+        "color": (180, 80, 255),   # ungu
+        "lore":  [
+            "Nakula adalah putra pertama dari ibu Madri,",
+            "lahir dari berkah kembar Dewa Aswin — dewa tabib.",
+            "",
+            "Ia dikenal sebagai yang terindah di antara Pandava,",
+            "ahli pedang, dan memiliki keahlian luar biasa",
+            "dalam merawat kuda — hewan yang sangat berharga",
+            "di era Mahabharata.",
+            "",
+            "Bersama saudara kembarnya Sadewa, Nakula menjadi",
+            "penjaga setia Yudhistira dan pelindung kubu Pandava.",
+            "",
+            "Meski tidak sepopuler Arjuna atau Bima dalam kisah",
+            "utama, kegesitan dan kelincahannya dalam pertempuran",
+            "menjadi aset tak ternilai bagi pasukan Pandava.",
+        ],
+    },
+    {
+        "name":  "Sadewa",
+        "title": "Si Kembar Cendekia Ahli Ilmu Bintang",
+        "card":  None,   # fallback ke card_yudhistira
+        "color": (255, 210, 60),   # emas
+        "lore":  [
+            "Sadewa adalah putra bungsu dari ibu Madri,",
+            "kembar dari Nakula, lahir dari berkah Dewa Aswin.",
+            "",
+            "Di antara lima Pandava, Sadewa memiliki kecerdasan",
+            "tertinggi dan menguasai ilmu astronomi & perbintangan.",
+            "Ia mampu meramal masa depan — namun dikutuk untuk",
+            "tidak mengungkapkannya tanpa ditanya terlebih dahulu.",
+            "",
+            "Sadewa mengetahui akan ada Perang Bharatayuddha",
+            "jauh sebelum terjadi, namun terpaksa diam karena",
+            "kutukan tersebut.",
+            "",
+            "Kekuatannya memang tidak sebesar Bima, tetapi",
+            "kombinasi kecerdasan dan kemampuan tempur Sadewa",
+            "menjadikannya pendekar yang sangat berbahaya.",
+        ],
+    },
+]
+
+
+def index_screen():
+    """Layar Index — pilih karakter Pandava untuk baca ceritanya."""
+    # Assign card references setelah aset dimuat
+    _PANDAVA_LORE[0]["card"] = card_arjuna
+    _PANDAVA_LORE[1]["card"] = card_bima
+    _PANDAVA_LORE[2]["card"] = card_yudhistira
+    _PANDAVA_LORE[3]["card"] = card_yudhistira   # belum ada card Nakula khusus
+    _PANDAVA_LORE[4]["card"] = card_yudhistira   # belum ada card Sadewa khusus
+
+    title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
+    name_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
+    sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 20)
+    hint_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    selected = 0
+    arrow_btn_size = 54
+    cx, cy   = WIDTH // 2, HEIGHT // 2
+
+    left_rect  = pygame.Rect(cx - 300 - arrow_btn_size // 2,
+                             cy - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+    right_rect = pygame.Rect(cx + 300 - arrow_btn_size // 2,
+                             cy - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+
+    back_w, back_h = 180, 50
+    back_rect = pygame.Rect(cx - back_w // 2, HEIGHT - back_h - 14,
+                            back_w, back_h)
+
+    def draw_arrow_btn(rect, symbol, hovered):
+        color  = (200, 170, 40) if hovered else (60, 50, 30)
+        border = (255, 220, 80) if hovered else (100, 80, 40)
+        pygame.draw.rect(screen, border, rect.inflate(4, 4), border_radius=10)
+        pygame.draw.rect(screen, color,  rect,               border_radius=9)
+        a_surf = title_font.render(symbol, True, WHITE)
+        screen.blit(a_surf, a_surf.get_rect(center=rect.center))
+
+    running = True
+    while running:
+        clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+        char = _PANDAVA_LORE[selected]
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                if event.key == pygame.K_RIGHT:
+                    selected = (selected + 1) % len(_PANDAVA_LORE)
+                if event.key == pygame.K_LEFT:
+                    selected = (selected - 1) % len(_PANDAVA_LORE)
+
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
+                if left_rect.collidepoint(mx, my):
+                    selected = (selected - 1) % len(_PANDAVA_LORE)
+                elif right_rect.collidepoint(mx, my):
+                    selected = (selected + 1) % len(_PANDAVA_LORE)
+                elif back_rect.collidepoint(mx, my):
+                    running = False
+
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH); ty = int(event.y * HEIGHT)
+                if left_rect.collidepoint(tx, ty):
+                    selected = (selected - 1) % len(_PANDAVA_LORE)
+                elif right_rect.collidepoint(tx, ty):
+                    selected = (selected + 1) % len(_PANDAVA_LORE)
+                elif back_rect.collidepoint(tx, ty):
+                    running = False
+
+        # ── Draw background ──────────────────────────────────────
+        screen.fill((12, 8, 22))
+        # Warna aksen tiap karakter sebagai tinted vignette tipis
+        tint = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        r, g, b = char["color"]
+        tint.fill((r, g, b, 20))
+        screen.blit(tint, (0, 0))
+
+        # ── Judul ──────────────────────────────────────────────────
+        t_surf = title_font.render("✦  INDEX PANDAVA  ✦", True, GOLD)
+        screen.blit(t_surf, (cx - t_surf.get_width() // 2, 10))
+
+        # ── Card karakter (kiri) ────────────────────────────────────
+        card_scaled = pygame.transform.scale(char["card"], (180, 250))
+        card_rect   = card_scaled.get_rect(topleft=(55, 80))
+        # Border warna karakter
+        pygame.draw.rect(screen, char["color"], card_rect.inflate(6, 6), 3, border_radius=6)
+        screen.blit(card_scaled, card_rect)
+
+        # ── Nama & judul karakter ──────────────────────────────────
+        name_surf = name_font.render(char["name"], True, char["color"])
+        screen.blit(name_surf, (260, 82))
+        sub_surf  = sub_font.render(char["title"], True, (200, 190, 210))
+        screen.blit(sub_surf, (260, 118))
+
+        # Garis pemisah tipis
+        pygame.draw.line(screen, char["color"], (260, 148), (WIDTH - 60, 148), 1)
+
+        # ── Teks cerita ────────────────────────────────────────────
+        lore_y = 158
+        for line in char["lore"]:
+            if line == "":
+                lore_y += 10
+                continue
+            l_surf = sub_font.render(line, True, (215, 205, 225))
+            screen.blit(l_surf, (260, lore_y))
+            lore_y += 24
+
+        # ── Dots navigator ─────────────────────────────────────────
+        dot_y = HEIGHT - 70
+        for i, p in enumerate(_PANDAVA_LORE):
+            dot_x = cx - (len(_PANDAVA_LORE) // 2 - i) * 22
+            col   = p["color"] if i == selected else (60, 55, 70)
+            pygame.draw.circle(screen, col, (dot_x, dot_y), 7)
+            if i == selected:
+                pygame.draw.circle(screen, WHITE, (dot_x, dot_y), 7, 2)
+
+        # ── Panah navigasi ─────────────────────────────────────────
+        draw_arrow_btn(left_rect,  "◄", left_rect.collidepoint(mouse_pos))
+        draw_arrow_btn(right_rect, "►", right_rect.collidepoint(mouse_pos))
+
+        # ── Tombol kembali ─────────────────────────────────────────
+        _draw_menu_btn(screen, sub_font, "◄  Kembali", back_rect,
+                       back_rect.collidepoint(mouse_pos))
+
+        hint = hint_font.render("◄ / ► untuk navigasi  |  ESC untuk kembali",
+                                True, (110, 100, 130))
+        screen.blit(hint, (cx - hint.get_width() // 2, HEIGHT - 18))
+
+        pygame.display.flip()
+
+# ================= MAP OVERLAY =================
+# Info per area — nama, warna, dan keterangan singkat
+_MAP_AREAS = {
+    1: {
+        "name":  "Medan Pertempuran",
+        "color": (220, 80,  60),
+        "desc":  ["Area awal — temukan musuh di sini.",
+                  "Fase Bertarung: kalahkan semua musuh",
+                  "hingga timer habis untuk buka portal."],
+        "icon":  "⚔",
+    },
+    2: {
+        "name":  "Dataran Tengah",
+        "color": (80,  160, 255),
+        "desc":  ["Hub utama penghubung semua area.",
+                  "Portal ke Map 3, 4, dan 5 tersedia di sini.",
+                  "Jelajahi tiap sudut untuk masuk area lain."],
+        "icon":  "✦",
+    },
+    3: {
+        "name":  "Hutan Sakral",
+        "color": (80,  220, 120),
+        "desc":  ["Area alam mistis penuh relic tersembunyi.",
+                  "Portal Resi Abimayasa bisa muncul di sini.",
+                  "Bisa kembali ke Dataran Tengah via portal."],
+        "icon":  "🌿",
+    },
+    4: {
+        "name":  "Kuil Kuno",
+        "color": (255, 180, 40),
+        "desc":  ["Reruntuhan candi penuh misteri dan relic.",
+                  "Portal Resi dan Batu Prasasti ada di sini.",
+                  "Bisa kembali ke Dataran Tengah via portal."],
+        "icon":  "🏛",
+    },
+    5: {
+        "name":  "Puncak Kahyangan",
+        "color": (180, 80,  255),
+        "desc":  ["Area tertinggi — langit dan awan.",
+                  "Relic langka dan Portal Resi ada di sini.",
+                  "Bisa kembali ke Dataran Tengah via portal."],
+        "icon":  "☁",
+    },
+}
+
+
+def show_map_overlay(current_map: int):
+    """Tampilkan overlay peta — blocking loop, return saat ditutup."""
+    title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 34)
+    area_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
+    desc_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 18)
+    hint_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 15)
+
+    frozen = screen.copy()
+
+    close_w, close_h = 170, 46
+    close_rect = pygame.Rect(WIDTH // 2 - close_w // 2,
+                             HEIGHT - close_h - 12, close_w, close_h)
+
+    # Layout 5 node peta dalam formasi: 1 di kiri, 2 di tengah atas,
+    # 3 di kanan bawah, 4 di tengah bawah, 5 di kanan atas
+    # Gunakan koordinat relatif di panel peta (panel 420×280 di tengah layar)
+    PANEL_X = WIDTH  // 2 - 210
+    PANEL_Y = HEIGHT // 2 - 155
+    NODE_POS = {
+        1: (PANEL_X + 42,  PANEL_Y + 130),   # kiri tengah
+        2: (PANEL_X + 210, PANEL_Y + 130),   # tengah
+        3: (PANEL_X + 80,  PANEL_Y + 50),    # kiri atas
+        4: (PANEL_X + 210, PANEL_Y + 220),   # bawah tengah
+        5: (PANEL_X + 340, PANEL_Y + 50),    # kanan atas
+    }
+    # Koneksi antar area (edge peta)
+    EDGES = [(1, 2), (2, 3), (2, 4), (2, 5)]
+    NODE_R = 28
+
+    running = True
+    while running:
+        clock.tick(FPS)
+        mouse_pos = pygame.mouse.get_pos()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_ESCAPE, pygame.K_m):
+                    running = False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if close_rect.collidepoint(mouse_pos):
+                    running = False
+            if event.type == pygame.FINGERDOWN:
+                tx = int(event.x * WIDTH); ty = int(event.y * HEIGHT)
+                if close_rect.collidepoint(tx, ty):
+                    running = False
+
+        # ── Background: frozen gameplay + gelap
+        screen.blit(frozen, (0, 0))
+        dim = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dim.fill((0, 0, 0, 175))
+        screen.blit(dim, (0, 0))
+
+        # ── Panel latar peta
+        panel_surf = pygame.Surface((440, 300), pygame.SRCALPHA)
+        panel_surf.fill((15, 10, 30, 220))
+        screen.blit(panel_surf, (PANEL_X - 10, PANEL_Y - 20))
+        pygame.draw.rect(screen, (90, 70, 130),
+                         (PANEL_X - 10, PANEL_Y - 20, 440, 300), 2, border_radius=10)
+
+        # ── Judul
+        t_surf = title_font.render("✦  PETA AREA  ✦", True, GOLD)
+        screen.blit(t_surf, (WIDTH // 2 - t_surf.get_width() // 2, PANEL_Y - 52))
+
+        # ── Gambar edge / koneksi
+        for a, b in EDGES:
+            pygame.draw.line(screen, (70, 60, 90),
+                             NODE_POS[a], NODE_POS[b], 3)
+
+        # ── Gambar node
+        for area_id, pos in NODE_POS.items():
+            area = _MAP_AREAS[area_id]
+            is_current = (area_id == current_map)
+            col = area["color"]
+
+            # Glow kalau area saat ini
+            if is_current:
+                glow_surf = pygame.Surface((NODE_R * 4, NODE_R * 4), pygame.SRCALPHA)
+                pygame.draw.circle(glow_surf, (*col, 60),
+                                   (NODE_R * 2, NODE_R * 2), NODE_R * 2)
+                screen.blit(glow_surf, (pos[0] - NODE_R * 2, pos[1] - NODE_R * 2))
+
+            pygame.draw.circle(screen, (20, 15, 35), pos, NODE_R)
+            pygame.draw.circle(screen, col, pos, NODE_R, 3 if not is_current else 0)
+            if is_current:
+                pygame.draw.circle(screen, col, pos, NODE_R)
+
+            # Icon area
+            icon_surf = area_font.render(area["icon"], True,
+                                         BLACK if is_current else col)
+            screen.blit(icon_surf, icon_surf.get_rect(center=pos))
+
+            # Nomor kecil di bawah node
+            num_surf = hint_font.render(str(area_id), True, WHITE)
+            screen.blit(num_surf, (pos[0] - num_surf.get_width() // 2,
+                                   pos[1] + NODE_R + 2))
+
+        # ── Panel info area saat ini (kanan layar)
+        info_x = PANEL_X + 460
+        info_y = PANEL_Y - 20
+        info_panel = pygame.Surface((220, 300), pygame.SRCALPHA)
+        info_panel.fill((15, 10, 30, 210))
+        screen.blit(info_panel, (info_x, info_y))
+        pygame.draw.rect(screen, _MAP_AREAS[current_map]["color"],
+                         (info_x, info_y, 220, 300), 2, border_radius=10)
+
+        cur = _MAP_AREAS[current_map]
+        now_surf = desc_font.render("LOKASI SEKARANG", True, (140, 130, 160))
+        screen.blit(now_surf, (info_x + 10, info_y + 10))
+
+        name_surf = area_font.render(cur["name"], True, cur["color"])
+        screen.blit(name_surf, (info_x + 10, info_y + 34))
+        pygame.draw.line(screen, cur["color"],
+                         (info_x + 10, info_y + 62),
+                         (info_x + 210, info_y + 62), 1)
+
+        dy = info_y + 72
+        for line in cur["desc"]:
+            d_surf = hint_font.render(line, True, (200, 195, 215))
+            screen.blit(d_surf, (info_x + 10, dy))
+            dy += 22
+
+        # Legenda "Kamu di sini"
+        pygame.draw.circle(screen, cur["color"],
+                           (info_x + 16, dy + 20), 8)
+        here_surf = hint_font.render("= Posisi kamu", True, (180, 175, 200))
+        screen.blit(here_surf, (info_x + 30, dy + 12))
+
+        # ── Tombol tutup
+        hov = close_rect.collidepoint(mouse_pos)
+        _draw_menu_btn(screen, desc_font, "✕  Tutup", close_rect, hov)
+
+        hint = hint_font.render("M / ESC untuk menutup", True, (90, 80, 110))
+        screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 14))
+
+        pygame.display.flip()
 def _draw_character_select_ui(surface, options, selected, title_font, hint_font):
     """Render character select screen: cards + arrow buttons + checkmark button."""
     surface.fill((15, 12, 28))
@@ -910,6 +1478,7 @@ def full_reset():
     arrows.empty()
     dialog_box.close()
     dialog_box.player_relics.clear()   # reset koleksi prasasti player
+    honor_system.reset()               # reset honor ke titik seimbang (0)
 
     # Currency
     water_count = 0
@@ -968,15 +1537,20 @@ def apply_dialog_action(action_key):
         player.speed += speed_up
         print(f"[DIALOG ACTION] {action_key}: speed +{speed_up:.1f} → {player.speed:.1f}")
 
+    # Trigger VFX aura sesuai prasasti yang digunakan
+    _aura_theme = {
+        "upgrade_strength_bima":    "gold",
+        "upgrade_arjuna":           "green",
+        "upgrade_speed_nakula":     "purple",
+        "upgrade_speed_yudhistira": "cyan",
+        "upgrade_strength_sadewa":  "teal",
+    }
+    theme = _aura_theme.get(action_key)
+    if theme:
+        upgrade_aura.trigger(player.rect.centerx, player.rect.centery, theme=theme)
 
 # ================= DEATH SCREEN =================
 def death_screen():
-    """
-    Layar kematian — tampil ketika HP player ≤ 0.
-    Tombol 'Play Again' → character select (restart fresh).
-    Tombol 'Quit'       → keluar program.
-    Mengembalikan 'restart' atau 'quit'.
-    """
     death_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 100)
     death_sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 32)
     death_btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 28)
@@ -1123,6 +1697,7 @@ def game_loop():
 
         # ================= EVENTS =================
         pressed_e    = False
+        pressed_m    = False
         should_pause = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1143,6 +1718,8 @@ def game_loop():
                     should_pause = True
                 if event.key == pygame.K_e:
                     pressed_e = True
+                if event.key == pygame.K_m:
+                    pressed_m = True
                 if event.key == pygame.K_y:
                     print(f"Player position: x={player.rect.centerx}, y={player.rect.centery}")
 
@@ -1361,6 +1938,10 @@ def game_loop():
         healing_aura.update()
         healing_aura.draw(screen)
 
+        upgrade_aura.update_origin(player.rect.centerx, player.rect.centery)
+        upgrade_aura.update()
+        upgrade_aura.draw(screen)
+
         arrows.draw(screen)
 
         # Portal map-transition prompt (gerbang pindah map, BUKAN Portal Resi)
@@ -1385,8 +1966,31 @@ def game_loop():
 
         draw_timer_panel()
 
+        # Honor bar — di bawah timer panel, pojok kanan atas
+        honor_system.draw_hud(screen, WIDTH - 240, 100, width=230)
+
         player_hud.draw(screen, player.health, player.max_health,
                          stamina_ratio_from_dash(player), water_count)
+
+        # ── Tombol MAP (hanya saat fase explore) ──────────────────────
+        # Tombol kecil di pojok kanan bawah, di atas mobile controls.
+        if phase == "explore":
+            map_btn_rect = pygame.Rect(WIDTH - 110, HEIGHT - 48, 100, 36)
+            map_mouse_hov = map_btn_rect.collidepoint(pygame.mouse.get_pos())
+            _draw_menu_btn(screen, small_font, "🗺  MAP", map_btn_rect, map_mouse_hov)
+
+            # Cek klik mouse pada tombol MAP
+            for _ev in pygame.event.get(pygame.MOUSEBUTTONDOWN):
+                if _ev.button == 1 and map_btn_rect.collidepoint(_ev.pos):
+                    pressed_m = True
+            # Cek touch pada tombol MAP
+            for _ev in pygame.event.get(pygame.FINGERDOWN):
+                tx2 = int(_ev.x * WIDTH); ty2 = int(_ev.y * HEIGHT)
+                if map_btn_rect.collidepoint(tx2, ty2):
+                    pressed_m = True
+
+            if pressed_m:
+                show_map_overlay(current_bg)
 
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens
