@@ -1,2 +1,2 @@
 # PANDAVA: Balance Of Dharma
-An indie game project made by 2 developers about saving the earth by cleaning trash. This project is made for the FIKSI competition in 2026.
+An indie game project made by 2 developers about the story of Pandava Lima or The Pandava Five in the Epos of Mahabrata 

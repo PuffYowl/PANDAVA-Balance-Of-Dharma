@@ -13,6 +13,8 @@ from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
 from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura, UpgradeAura, HonorSystem
+from sacred_tree import CovenantNPC, TreeRitualSystem, do_covenant_dialog, do_ritual_minigame
+import sacred_tree as _sacred_tree
 from player_hud import PlayerHUD, stamina_ratio_from_dash
 pygame.init() 
 
@@ -21,6 +23,7 @@ WIDTH, HEIGHT = 960, 540
 screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE | pygame.SCALED)
 pygame.display.set_caption("Pandava: Balance of Dharma")
 clock = pygame.time.Clock()
+_sacred_tree.WIDTH_FALLBACK = WIDTH   # supaya punishment enemy spawn di tepi layar yang benar
 
 
 # Virtual joystick + attack/dash buttons for mobile.
@@ -32,6 +35,10 @@ upgrade_aura = UpgradeAura()
 honor_system = HonorSystem(initial=0)      # mulai seimbang (0)
 dialog_box.honor_system = honor_system     # honor bar muncul di dalam dialog
 player_hud = PlayerHUD()
+
+# ── Sacred Tree / Covenant NPC ─────────────────────────────────────────
+covenant_npc  = CovenantNPC()
+ritual_system = TreeRitualSystem(covenant_npc, fps=60)
 FPS = 60
 
 # ================= LOAD ASSETS =================
@@ -93,6 +100,31 @@ if bg_resi is None:
     bg_resi.fill((30, 20, 45))
     print("[BG RESI] File tidak ditemukan — pakai fallback warna gelap.")
 
+# ── Covenant NPC assets — salin ke assets2 jika file sumber ada ────────
+import shutil as _shutil, os as _os
+_covenant_asset_map = {
+    "assets2/covenant_tiger.png": [
+        "assets2/covenant_tiger.png",
+        # Sumber: frame_0000.png yang diupload user
+    ],
+    "assets2/covenant_tree.png": [
+        "assets2/covenant_tree.png",
+    ],
+}
+# Kalau asset belum ada, coba copy dari uploads / working dir
+for _dst, _srcs in [
+    ("assets2/covenant_tiger.png",
+     ["assets2/frame_0000.png", "frame_0000.png"]),
+    ("assets2/covenant_tree.png",
+     ["assets2/big.png", "big.png"]),
+]:
+    if not _os.path.exists(_dst):
+        for _src in _srcs:
+            if _os.path.exists(_src):
+                _shutil.copy2(_src, _dst)
+                print(f"[COVENANT] Copied {_src} → {_dst}")
+                break
+
 pixel_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
 btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 80)
 hud_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
@@ -113,7 +145,7 @@ PURPLE = (180, 80,  255)
 GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 60
+LOBBY_DURATION   = 3
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -137,6 +169,7 @@ water_count = 0
 # ================= PLAYER =================
 player  = Archer(400, 300)
 player.mobile_controls = mobile_controls
+player.honor_system    = honor_system
 players = pygame.sprite.Group(player)
 broadcast_character(player)
 player_hud.set_character(player.__class__.__name__)
@@ -455,6 +488,7 @@ def tutorial_screen():
         ("  Gerak   :  WASD / Arrow Keys / Joystick kiri", False),
         ("  Serang  :  J / Tombol ATK", False),
         ("  Dash    :  K / Tombol DASH", False),
+        ("  Ultimate:  U / Tombol BOOST  (khusus Arjuna)", False),
         ("  Interaksi: E (dekat portal / relic / Resi)", False),
         ("  Jeda    :  ESC / Tombol Pause (atas tengah)", False),
         ("", False),
@@ -1039,6 +1073,7 @@ def character_select():
         selected_class = options[selected]["class"]
         player  = selected_class(400, 300)
         player.mobile_controls = mobile_controls
+        player.honor_system    = honor_system
         players = pygame.sprite.Group(player)
         broadcast_character(player)
         player_hud.set_character(player.__class__.__name__)
@@ -1420,6 +1455,7 @@ def restart_from_pause(new_player_class):
     global player, players, phase, phase_frames, bg_game, current_bg, enemy_respawn_timer
     player = new_player_class(*SPAWN_POS)
     player.mobile_controls = mobile_controls
+    player.honor_system    = honor_system
     players = pygame.sprite.Group(player)
     broadcast_character(player)
     player_hud.set_character(player.__class__.__name__)
@@ -1479,6 +1515,9 @@ def full_reset():
     dialog_box.close()
     dialog_box.player_relics.clear()   # reset koleksi prasasti player
     honor_system.reset()               # reset honor ke titik seimbang (0)
+    covenant_npc.hide()                # sembunyikan NPC
+    ritual_system.covenant_made = False
+    ritual_system.stop()
 
     # Currency
     water_count = 0
@@ -1494,6 +1533,10 @@ def start_lobby():
     player.rect.center = SPAWN_POS
     if len(enemies) == 0:
         enemies.add(Enemy(*enemy_spawn_pos))
+    # Covenant NPC — muncul saat fight phase jika perjanjian sudah dibuat
+    if ritual_system.covenant_made:
+        covenant_npc.place_random(map_id=1)
+        ritual_system.start_timer()
 
 def start_explore():
     global phase, phase_frames, bg_game, current_bg
@@ -1503,6 +1546,13 @@ def start_explore():
     current_bg   = 2
     player.rect.center = BG2_SPAWN_POS
     enemies.empty()
+    # NPC muncul di explore phase hanya sebelum perjanjian dibuat
+    if not ritual_system.covenant_made:
+        covenant_npc.place_random(map_id=2)
+        covenant_npc.tiger_hidden = False
+    else:
+        covenant_npc.hide()
+    ritual_system.stop()
 
 
 # ================= APPLY DIALOG ACTION =================
@@ -1696,9 +1746,21 @@ def game_loop():
                     start_lobby()
 
         # ================= EVENTS =================
-        pressed_e    = False
-        pressed_m    = False
-        should_pause = False
+        pressed_e     = False
+        pressed_m     = False
+        should_pause  = False
+        boost_pressed = False
+        # Posisi tombol BOOST/ULT (khusus Archer/Arjuna) — tengah bawah layar.
+        # Dihitung di sini supaya bisa dipakai untuk deteksi klik/touch di
+        # loop event di bawah.
+        boost_btn_w, boost_btn_h = 100, 36
+        boost_btn_rect = pygame.Rect(
+            WIDTH // 2 - boost_btn_w // 2,
+            HEIGHT - boost_btn_h - 16,
+            boost_btn_w,
+            boost_btn_h,
+        )
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
@@ -1722,6 +1784,21 @@ def game_loop():
                     pressed_m = True
                 if event.key == pygame.K_y:
                     print(f"Player position: x={player.rect.centerx}, y={player.rect.centery}")
+
+            # Tombol BOOST/ULT — diecek di SINI (langsung di event loop utama),
+            # bukan lewat pygame.event.get(TYPE) lagi belakangan, karena loop
+            # ini sudah "mengambil semua" event dari queue duluan. Kalau dicek
+            # ulang nanti, queue-nya sudah kosong dan tombolnya tidak akan
+            # merespons klik/sentuhan sama sekali (tombol MAP kena masalah ini).
+            if hasattr(player, "activate_ultimate"):
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if boost_btn_rect.collidepoint(event.pos):
+                        boost_pressed = True
+                elif event.type == pygame.FINGERDOWN:
+                    tbx = int(event.x * WIDTH); tby = int(event.y * HEIGHT)
+                    if boost_btn_rect.collidepoint(tbx, tby):
+                        boost_pressed = True
+
 
         mobile_controls.update()
 
@@ -1788,20 +1865,51 @@ def game_loop():
                     arrow.kill()
 
         # ================= REWARD: +1 WATER SAAT MUSUH MATI =================
-        # Dicek SETELAH semua sumber damage (melee + arrow) di atas, supaya
-        # tidak peduli enemy mati lewat cara apa. just_died adalah flag
-        # one-shot dari enemy1.py/enemy2.py — begitu kebaca di sini langsung
-        # direset, jadi water_count cuma nambah sekali per kematian.
         for enemy in enemies:
             if getattr(enemy, "just_died", False):
                 water_count += 1
                 enemy.just_died = False
 
+        # ================= COVENANT NPC INTERACTION ==========
+        if covenant_npc.visible and covenant_npc.map_id == current_bg:
+            # Update ritual timer → mungkin spawn Enemy2 punishment
+            new_punish = ritual_system.update(player, enemies, water_count)
+            for pe in new_punish:
+                enemies.add(pe)
+
+            # Cek interaksi player dengan NPC
+            if covenant_npc.near_player(player) and pressed_e and not show_interact:
+                if not ritual_system.covenant_made:
+                    # Belum ada perjanjian — tampilkan dialog perjanjian
+                    result = do_covenant_dialog(
+                        screen, clock, FPS, pixel_font, small_font)
+                    if result == "accept":
+                        ritual_system.covenant_made = True
+                        # Buff player: +20 max HP, +1 damage
+                        player.max_health += 20
+                        player.health     = min(player.health + 20, player.max_health)
+                        player.damage     += 1
+                        # Mulai timer ritual
+                        covenant_npc.place_random(map_id=1)
+                        ritual_system.start_timer()
+                        print("[COVENANT] Perjanjian diterima! HP+20, Damage+1")
+                else:
+                    # Perjanjian sudah ada — cek ritual siram pohon
+                    if covenant_npc.near_tree(player):
+                        used = do_ritual_minigame(
+                            screen, clock, FPS, pixel_font, small_font, water_count)
+                        if used > 0:
+                            water_count -= used
+                            ritual_system.reset_timer()
+                            print(f"[RITUAL] Berhasil! Timer direset. Air sisa: {water_count}")
+
         # ================= ENEMY ATTACK =================
         for enemy in enemies:
             atk = enemy.get_attack_hitbox()
             if atk and atk.colliderect(player.rect):
-                player.take_damage(1)
+                # Punishment enemy punya damage lebih tinggi
+                dmg = getattr(enemy, "_punishment_damage", 1)
+                player.take_damage(dmg)
 
         # ================= PORTAL INTERACTION =================
         show_interact = False
@@ -1909,6 +2017,10 @@ def game_loop():
                 bg_game    = bg_map5
                 current_bg = 5
                 player.rect.center = BG5_SPAWN_POS
+            # Spawn NPC di map baru saat explore phase (hanya sebelum perjanjian)
+            if phase == "explore" and not ritual_system.covenant_made:
+                covenant_npc.place_random(map_id=current_bg)
+                covenant_npc.tiger_hidden = False
 
         # ================= ENEMY RESPAWN (lobby only) =================
         if phase == "lobby":
@@ -1920,12 +2032,23 @@ def game_loop():
         else:
             enemy_respawn_timer = 0
 
-        # ================= DRAW =================
+        # ═══ DRAW ═══════════════════════════════════════════════════════
         screen.blit(bg_game, (0, 0))
 
         enemies.draw(screen)
         for enemy in enemies:
             enemy.draw_healthbar(screen)
+
+        # Covenant NPC (pohon + harimau) — fight phase & explore phase
+        if covenant_npc.visible and covenant_npc.map_id == current_bg:
+            covenant_npc.draw(screen)
+            near_tree_for_ritual = (ritual_system.covenant_made and
+                                    covenant_npc.near_tree(player))
+            covenant_npc.draw_prompt(
+                screen, player, small_font, GOLD, WHITE,
+                covenant_made=ritual_system.covenant_made,
+                near_tree=near_tree_for_ritual,
+            )
 
         # ← RELIC & PORTAL RESI DIGAMBAR DI SINI
         draw_relic()
@@ -1969,6 +2092,10 @@ def game_loop():
         # Honor bar — di bawah timer panel, pojok kanan atas
         honor_system.draw_hud(screen, WIDTH - 240, 100, width=230)
 
+        # Ritual timer — pojok kiri bawah (hanya saat fight phase & covenant aktif)
+        if phase == "lobby":
+            ritual_system.draw_timer(screen, pixel_font, small_font)
+
         player_hud.draw(screen, player.health, player.max_health,
                          stamina_ratio_from_dash(player), water_count)
 
@@ -1992,10 +2119,50 @@ def game_loop():
             if pressed_m:
                 show_map_overlay(current_bg)
 
+        # ── Tombol BOOST / ULTIMATE / RAGE (khusus Archer/Arjuna) ──────
+        # Tengah bawah layar — tetap kelihatan di kedua fase (lobby & explore).
+        # Tombol yang SAMA berubah fungsi tergantung state:
+        #   1. "🔥 AKTIF!"  — ultimate biasa sedang berjalan
+        #   2. "⏳ Xs"      — masih cooldown
+        #   3. "💢 RAGE!"   — window RAGE terbuka (5 detik setelah cooldown
+        #                     ultimate biasa habis) — kalau dipencet di sini,
+        #                     boost LEBIH BESAR tapi honor turun (adharma naik)
+        #   4. "⚡ ULT"     — siap pakai (ultimate biasa)
+        if hasattr(player, "activate_ultimate"):
+            boost_hover = boost_btn_rect.collidepoint(pygame.mouse.get_pos())
+
+            in_rage_window = getattr(player, "rage_window_active", False)
+            in_rage_active = getattr(player, "rage_active", False)
+
+            if player.ultimate_active or in_rage_active:
+                boost_label = "🔥 AKTIF!"
+            elif in_rage_window:
+                boost_label = "💢 RAGE!"
+            elif player.ultimate_cooldown_timer > 0:
+                cd_left     = player.ultimate_cooldown_timer // FPS + 1
+                boost_label = f"⏳ {cd_left}s"
+            else:
+                boost_label = "⚡ ULT"
+
+            _draw_menu_btn(screen, small_font, boost_label, boost_btn_rect, boost_hover)
+
+            if boost_pressed:
+                if in_rage_window and hasattr(player, "activate_rage"):
+                    player.activate_rage()
+                else:
+                    player.activate_ultimate()
+
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens
         # because draw() is not called at all in main_menu() or character_select().
         mobile_controls.draw(screen, show_pause=True)
+
+        # Banner "Boost!" ultimate Arjuna / "RAGE!" — digambar paling akhir
+        # supaya muncul di atas semua elemen lain (HUD, mobile controls, dll).
+        if hasattr(player, "draw_ultimate_banner"):
+            player.draw_ultimate_banner(screen)
+        if hasattr(player, "draw_rage_banner"):
+            player.draw_rage_banner(screen)
 
         pygame.display.flip()
 
