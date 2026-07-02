@@ -44,7 +44,7 @@ class Enemy2(pygame.sprite.Sprite):
 
                 "walk": load_frames(f"{assets_folder}/Walk", 0.24),
                 "die": load_frames(f"{assets_folder}/Die", 0.16),
-                "attack": load_frames(f"{assets_folder}/Attack", 0.3),
+                "attack": load_frames(f"{assets_folder}/Attack", 0.16),
 
             }
 

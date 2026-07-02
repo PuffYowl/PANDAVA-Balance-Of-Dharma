@@ -8,6 +8,9 @@ from player.archer import Archer
 from player.spear import Spear
 from player.arrow import Arrow
 from player.hammer import Hammer
+from miniboss1 import Miniboss_1
+from player.nakula import Nakula
+from player.sadewa import Sadewa
 from enemy1 import Enemy
 from enemy2 import Enemy2
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
@@ -51,6 +54,10 @@ card_bima       = pygame.image.load("assets2/bima_card.png").convert_alpha()
 card_yudhistira = pygame.transform.scale(card_yudhistira, (300, 400))
 card_arjuna     = pygame.transform.scale(card_arjuna,     (300, 400))
 card_bima       = pygame.transform.scale(card_bima,       (300, 400))
+card_nakula     = pygame.image.load("assets2/card_nakula.png").convert_alpha()
+card_nakula     = pygame.transform.scale(card_nakula, (300, 400))
+card_sadewa     = pygame.image.load("assets2/card_sadewa.png").convert_alpha()
+card_sadewa     = pygame.transform.scale(card_sadewa, (300, 400))
 
 relic_arjuna    = pygame.image.load("assets2/relic1.png").convert_alpha()
 relic_arjuna    = pygame.transform.scale(relic_arjuna, (25, 25))
@@ -75,6 +82,17 @@ bg_map4 = pygame.image.load("assets2/background10.png").convert()
 bg_map4 = pygame.transform.scale(bg_map4, (WIDTH, HEIGHT))
 bg_map5 = pygame.image.load("assets2/background11.png").convert()
 bg_map5 = pygame.transform.scale(bg_map5, (WIDTH, HEIGHT))
+
+# Background arena mini boss fight
+try:
+    bg_arena = pygame.image.load("assets2/arena-bg.png").convert()
+    bg_arena = pygame.transform.scale(bg_arena, (WIDTH, HEIGHT))
+    print("[BG] Arena background loaded.")
+except (pygame.error, FileNotFoundError):
+    bg_arena = pygame.Surface((WIDTH, HEIGHT))
+    bg_arena.fill((40, 20, 10))
+    print("[BG ARENA] arena-bg.png tidak ditemukan — pakai fallback gelap.")
+    print("[BG ARENA] Salin arena-bg.png ke folder assets2/ !")
 
 bg_game    = bg_map1
 current_bg = 1
@@ -130,6 +148,27 @@ btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 80)
 hud_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
 small_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 20)
 
+# Font khusus emoji — Segoe UI Emoji built-in di Windows
+# Dipakai untuk render karakter emoji yang tidak ada di font pixel custom
+emoji_font_s  = pygame.font.SysFont("segoeuiemoji", 20)   # setara small_font
+emoji_font_m  = pygame.font.SysFont("segoeuiemoji", 24)   # setara hud_font
+emoji_font_l  = pygame.font.SysFont("segoeuiemoji", 36)   # setara pixel_font
+
+
+def render_with_emoji(font, emoji_font, text, color):
+    """
+    Render teks yang mengandung emoji dengan menggabungkan dua surface:
+    - Teks biasa dirender dengan font pixel custom
+    - Emoji dirender dengan Segoe UI Emoji lalu di-blit di atas
+    Cara mudah: render seluruhnya pakai emoji_font (warna teks tetap sama),
+    lalu overlay teks non-emoji pakai font asli kalau tidak ada emoji.
+    Kalau ada emoji, pakai emoji_font saja supaya konsisten.
+    """
+    has_emoji = any(ord(c) > 127 and ord(c) not in range(0x2000, 0x2800) for c in text)
+    if has_emoji:
+        return emoji_font.render(text, True, color)
+    return font.render(text, True, color)
+
 arrows = pygame.sprite.Group()
 
 # ================= COLORS =================
@@ -145,7 +184,7 @@ PURPLE = (180, 80,  255)
 GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 3
+LOBBY_DURATION   = 60
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -165,6 +204,12 @@ SPAWN_POS      = (400, 300)
 # sesuai permintaan — nanti tinggal update variabel ini begitu ada sistem
 # pickup/currency air yang sebenarnya.
 water_count = 0
+
+# ================= ROUND & MINIBOSS STATE =================
+current_round      = 1
+miniboss_round     = random.choice([1, 2, 3])
+miniboss_triggered = False
+print(f"[MINIBOSS] Mini Boss Battle akan muncul di Round {miniboss_round}")
 
 # ================= PLAYER =================
 player  = Archer(400, 300)
@@ -392,9 +437,13 @@ def draw_timer_panel():
     sub_surf = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16).render(sub_text, True, (180, 180, 180))
     screen.blit(sub_surf, (panel_x + 8, panel_y + 56))
 
+    # Round indicator — selalu tampil di bawah timer panel
+    round_surf = small_font.render(f"◎ Round {current_round}", True, (180, 180, 180))
+    screen.blit(round_surf, (panel_x + 8, panel_y + panel_h + 6))
+
     if relic["collected"]:
         relic_surf = small_font.render(f"✦ {relic['name']}", True, GOLD)
-        screen.blit(relic_surf, (panel_x + 8, panel_y + panel_h + 6))
+        screen.blit(relic_surf, (panel_x + 8, panel_y + panel_h + 28))
 
 # ================= BUTTON =================
 def button(text, center, mouse_pos):
@@ -488,7 +537,7 @@ def tutorial_screen():
         ("  Gerak   :  WASD / Arrow Keys / Joystick kiri", False),
         ("  Serang  :  J / Tombol ATK", False),
         ("  Dash    :  K / Tombol DASH", False),
-        ("  Ultimate:  U / Tombol BOOST  (khusus Arjuna)", False),
+        ("  Ultimate:  U / Tombol BOOST  (semua karakter)", False),
         ("  Interaksi: E (dekat portal / relic / Resi)", False),
         ("  Jeda    :  ESC / Tombol Pause (atas tengah)", False),
         ("", False),
@@ -678,8 +727,8 @@ def index_screen():
     _PANDAVA_LORE[0]["card"] = card_arjuna
     _PANDAVA_LORE[1]["card"] = card_bima
     _PANDAVA_LORE[2]["card"] = card_yudhistira
-    _PANDAVA_LORE[3]["card"] = card_yudhistira   # belum ada card Nakula khusus
-    _PANDAVA_LORE[4]["card"] = card_yudhistira   # belum ada card Sadewa khusus
+    _PANDAVA_LORE[3]["card"] = card_nakula   # belum ada card Nakula khusus
+    _PANDAVA_LORE[4]["card"] = card_sadewa   # belum ada card Sadewa khusus
 
     title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
     name_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
@@ -939,8 +988,8 @@ def show_map_overlay(current_map: int):
             if is_current:
                 pygame.draw.circle(screen, col, pos, NODE_R)
 
-            # Icon area
-            icon_surf = area_font.render(area["icon"], True,
+            # Icon area — pakai emoji_font supaya emoji terlihat
+            icon_surf = emoji_font_m.render(area["icon"], True,
                                          BLACK if is_current else col)
             screen.blit(icon_surf, icon_surf.get_rect(center=pos))
 
@@ -1056,7 +1105,8 @@ def character_select():
         {"class": Archer,  "card": card_arjuna,     "name": "Arjuna"},
         {"class": Spear,   "card": card_yudhistira,  "name": "Yudhistira"},
         {"class": Hammer,  "card": card_bima,        "name": "Bima"},
-        {"class": Assasin, "card": card_yudhistira,  "name": "Assasin"},
+        {"class": Nakula, "card": card_nakula,  "name": "Nakula"},
+        {"class": Sadewa, "card": card_sadewa,  "name": "Sadewa"}
     ]
     selected  = 0
     sel_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
@@ -1453,6 +1503,7 @@ def restart_from_pause(new_player_class):
     """Switches the player character without resetting the relic.
     Resets enemies and phase timer, spawns player at the default position."""
     global player, players, phase, phase_frames, bg_game, current_bg, enemy_respawn_timer
+    global current_round, miniboss_round, miniboss_triggered
     player = new_player_class(*SPAWN_POS)
     player.mobile_controls = mobile_controls
     player.honor_system    = honor_system
@@ -1468,6 +1519,11 @@ def restart_from_pause(new_player_class):
     enemies.empty()
     enemies.add(Enemy(*enemy_spawn_pos))
     enemy_respawn_timer = 0
+    # Reset round
+    current_round      = 1
+    miniboss_round     = random.choice([1, 2, 3])
+    miniboss_triggered = False
+    print(f"[RESTART] Round reset ke 1. Miniboss baru akan muncul di Round {miniboss_round}")
 
 
 # ================= FULL RESET (setelah mati) =================
@@ -1486,11 +1542,13 @@ def full_reset():
     - Arrows → kosong
     - Dialog box → ditutup paksa
     - Enemy respawn timer → 0
+    - Round → kembali ke 1, miniboss trigger di-roll ulang
     """
     global phase, phase_frames, bg_game, current_bg
     global enemies, enemy_respawn_timer
     global relic, portal, relic_notif_timer
     global water_count, arrows
+    global current_round, miniboss_round, miniboss_triggered
 
     # Phase & map
     phase        = "lobby"
@@ -1522,6 +1580,12 @@ def full_reset():
     # Currency
     water_count = 0
 
+    # Round & miniboss — roll ulang round muncul miniboss
+    current_round      = 1
+    miniboss_round     = random.choice([1, 2, 3])
+    miniboss_triggered = False
+    print(f"[FULL RESET] Round reset ke 1. Miniboss baru akan muncul di Round {miniboss_round}")
+
 
 # ================= PHASE TRANSITION HELPERS =================
 def start_lobby():
@@ -1533,10 +1597,14 @@ def start_lobby():
     player.rect.center = SPAWN_POS
     if len(enemies) == 0:
         enemies.add(Enemy(*enemy_spawn_pos))
-    # Covenant NPC — muncul saat fight phase jika perjanjian sudah dibuat
+    # Covenant NPC — SETELAH perjanjian dibuat, pohon+harimau pindah ke fight phase.
+    # Sebelum perjanjian dibuat, mereka TIDAK muncul di sini (masih di explore).
     if ritual_system.covenant_made:
         covenant_npc.place_random(map_id=1)
         ritual_system.start_timer()
+    else:
+        covenant_npc.hide()
+        ritual_system.stop()
 
 def start_explore():
     global phase, phase_frames, bg_game, current_bg
@@ -1546,13 +1614,15 @@ def start_explore():
     current_bg   = 2
     player.rect.center = BG2_SPAWN_POS
     enemies.empty()
-    # NPC muncul di explore phase hanya sebelum perjanjian dibuat
+    # Covenant NPC — SEBELUM perjanjian dibuat, pohon+harimau muncul di sini
+    # (explore phase) supaya player bisa menemukan & berbicara dengannya.
+    # SETELAH perjanjian dibuat, mereka pindah total ke fight phase — jadi
+    # di sini disembunyikan.
     if not ritual_system.covenant_made:
         covenant_npc.place_random(map_id=2)
-        covenant_npc.tiger_hidden = False
     else:
         covenant_npc.hide()
-    ritual_system.stop()
+        ritual_system.stop()
 
 
 # ================= APPLY DIALOG ACTION =================
@@ -1598,6 +1668,241 @@ def apply_dialog_action(action_key):
     theme = _aura_theme.get(action_key)
     if theme:
         upgrade_aura.trigger(player.rect.centerx, player.rect.centery, theme=theme)
+
+# ================= MINIBOSS: INTRO SCREEN =================
+def miniboss_intro_screen(round_num):
+    """
+    Layar hitam dengan teks merah 'Mini Boss Battle' yang fade in → tahan → fade out.
+    Total durasi ±3.5 detik (210 frame @60fps).
+    """
+    intro_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 72)
+    intro_sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
+
+    FADE_IN  = 60
+    HOLD     = 90
+    FADE_OUT = 60
+    TOTAL    = FADE_IN + HOLD + FADE_OUT
+
+    for frame in range(TOTAL):
+        clock.tick(FPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+        if frame < FADE_IN:
+            alpha = int((frame / FADE_IN) * 255)
+        elif frame < FADE_IN + HOLD:
+            alpha = 255
+        else:
+            alpha = int(((TOTAL - frame) / FADE_OUT) * 255)
+
+        screen.fill((0, 0, 0))
+
+        title_surf = intro_title_font.render("Mini Boss Battle", True, (220, 30, 30))
+        title_surf.set_alpha(alpha)
+        screen.blit(title_surf, title_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40)))
+
+        sub_surf = intro_sub_font.render(
+            f"Kurawa's General  —  Round {round_num}", True, (200, 160, 80)
+        )
+        sub_surf.set_alpha(alpha)
+        screen.blit(sub_surf, sub_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 46)))
+
+        pygame.display.flip()
+
+
+# ================= MINIBOSS: BOSS HEALTH BAR =================
+def _draw_boss_healthbar(surface, boss, name_font, hp_font):
+    """
+    Health bar besar terpusat di atas layar khusus saat miniboss fight.
+    Label 'Kurawa's General' di atas bar, angka HP di dalam bar.
+    """
+    BAR_W = 440
+    BAR_H = 26
+    BAR_X = WIDTH  // 2 - BAR_W // 2
+    BAR_Y = 18
+
+    # Track / background
+    pygame.draw.rect(surface, (20,  8,  8), (BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6), border_radius=8)
+    pygame.draw.rect(surface, (60, 20, 20), (BAR_X,     BAR_Y,     BAR_W,     BAR_H),       border_radius=6)
+
+    # Fill
+    ratio  = max(0.0, boss.health / boss.max_health)
+    fill_w = int(BAR_W * ratio)
+    if ratio > 0.5:
+        bar_color = (200, 40, 40)
+    elif ratio > 0.25:
+        bar_color = (220, 100, 20)
+    else:
+        bar_color = (255, 50, 20)
+
+    if fill_w > 0:
+        pygame.draw.rect(surface, bar_color, (BAR_X, BAR_Y, fill_w, BAR_H), border_radius=6)
+
+    # Border
+    pygame.draw.rect(surface, (160, 60, 60), (BAR_X, BAR_Y, BAR_W, BAR_H), 2, border_radius=6)
+
+    # HP text di tengah bar
+    hp_text = hp_font.render(f"{max(0, boss.health)} / {boss.max_health}", True, (255, 220, 220))
+    surface.blit(hp_text, hp_text.get_rect(center=(BAR_X + BAR_W // 2, BAR_Y + BAR_H // 2)))
+
+    # Nama boss di atas bar (shadow + label)
+    NAME   = "Kurawa's General"
+    shadow = name_font.render(NAME, True, (40, 10, 10))
+    label  = name_font.render(NAME, True, (255, 200, 60))
+    surface.blit(shadow, shadow.get_rect(center=(WIDTH // 2 + 2, BAR_Y - 15 + 2)))
+    surface.blit(label,  label.get_rect(center=(WIDTH // 2,      BAR_Y - 15)))
+
+
+# ================= MINIBOSS: FIGHT LOOP =================
+def miniboss_fight_loop(round_num):
+    """
+    Urutan lengkap mini boss fight:
+      intro screen  → masuk arena  → boss intro anim  → kejar player
+      → boss mati (anim die) → kembali ke explore phase.
+
+    Return value:
+      'victory'      — boss kalah, lanjut ke explore
+      'player_died'  — player mati, sudah handle death_screen + full_reset di sini
+      'menu'         — player minta kembali ke main menu
+    """
+    global state
+
+    # ── 1. Tampilkan intro screen ────────────────────────────────────
+    miniboss_intro_screen(round_num)
+
+    # ── 2. Setup boss & posisi player ───────────────────────────────
+    boss       = Miniboss_1(WIDTH // 2, HEIGHT // 2 - 30, screen=screen)
+    boss_group = pygame.sprite.Group(boss)
+
+    player.rect.center = (WIDTH // 2, HEIGHT - 140)
+    if hasattr(player, 'x'):
+        player.x = float(player.rect.centerx)
+    if hasattr(player, 'y'):
+        player.y = float(player.rect.centery)
+
+    boss_name_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
+    boss_hp_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    fight_over         = False
+    death_linger_timer = 0    # frame tunggu setelah boss mati
+
+    # ── 3. Fight loop ────────────────────────────────────────────────
+    while True:
+        clock.tick(FPS)
+
+        # Cek kematian player
+        if player.health <= 0:
+            result = death_screen()
+            if result == "quit":
+                pygame.quit(); sys.exit()
+            full_reset()
+            state = "select"
+            return "player_died"
+
+        # Events
+        should_pause = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if dialog_box.active:
+                dialog_box.handle_event(event)
+                continue
+            mobile_controls.handle_event(event)
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    should_pause = True
+
+        mobile_controls.update()
+
+        if mobile_controls.pause_just_pressed:
+            mobile_controls.pause_just_pressed = False
+            should_pause = True
+
+        if should_pause:
+            pm_result, _ = pause_menu()
+            while pm_result == "settings":
+                settings_menu()
+                pm_result, _ = pause_menu()
+            if pm_result == "menu":
+                state = "menu"
+                return "menu"
+            elif pm_result == "select":
+                chosen = character_select_from_pause()
+                if chosen is not None:
+                    restart_from_pause(chosen)
+                    return "player_died"
+
+        # Update player
+        players.update()
+        player.rect.clamp_ip(screen.get_rect())
+
+        # Panah (Archer)
+        if player.spawn_arrow:
+            arrow = Arrow(player.rect.centerx, player.rect.centery, player.facing)
+            arrows.add(arrow)
+            player.spawn_arrow = False
+        arrows.update()
+
+        if not fight_over:
+            boss_group.update(player)
+
+            # Player serang boss
+            if not isinstance(player, Archer):
+                attack_box = player.get_attack_hitbox()
+                if attack_box and boss.rect.colliderect(attack_box):
+                    boss.take_damage(player.facing, player.damage)
+
+            for arrow in list(arrows):
+                if arrow.rect.colliderect(boss.rect):
+                    boss.take_damage(player.facing, player.damage)
+                    arrow.kill()
+
+            # Boss serang player
+            atk = boss.get_attack_hitbox()
+            if atk and atk.colliderect(player.rect):
+                player.take_damage(1)
+
+            # Boss baru saja mati?
+            if boss.just_died:
+                boss.just_died     = False
+                fight_over         = True
+                death_linger_timer = 160   # ±2.7 detik tunggu animasi die selesai
+
+        else:
+            # Terus update biar animasi mati jalan
+            boss_group.update(player)
+            death_linger_timer -= 1
+            if boss.death_done and death_linger_timer <= 0:
+                return "victory"
+
+        # ── Draw ──────────────────────────────────────────────────────
+        screen.blit(bg_arena, (0, 0))
+
+        boss_group.draw(screen)
+        player.draw(screen)
+        arrows.draw(screen)
+
+        # Health bar besar di atas hanya saat boss belum benar-benar mati
+        if not boss.death_done:
+            _draw_boss_healthbar(screen, boss, boss_name_font, boss_hp_font)
+
+        # HUD player
+        healing_aura.update_origin(player.rect.centerx, player.rect.top)
+        healing_aura.update()
+        healing_aura.draw(screen)
+
+        player_hud.draw(screen, player.health, player.max_health,
+                        stamina_ratio_from_dash(player), water_count)
+
+        if hasattr(player, "draw_ultimate_banner"):
+            player.draw_ultimate_banner(screen)
+        if hasattr(player, "draw_rage_banner"):
+            player.draw_rage_banner(screen)
+
+        mobile_controls.draw(screen, show_pause=True)
+        pygame.display.flip()
+
 
 # ================= DEATH SCREEN =================
 def death_screen():
@@ -1696,6 +2001,7 @@ def game_loop():
     global relic_notif_timer
     global water_count
     global relic, portal
+    global current_round, miniboss_round, miniboss_triggered
 
     # Track action dari node dialog terakhir yang punya "action" field
     last_dialog_action = None
@@ -1739,10 +2045,31 @@ def game_loop():
                     # ── Fight phase selesai → generate relic & portal baru ──
                     relic  = generate_relic()
                     portal = generate_portal_resi()
-                    print(f"[PHASE] Fight selesai! Relic baru: '{relic['name']}' di Map {relic['map']}")
+                    print(f"[PHASE] Fight selesai! Round {current_round}.")
+                    print(f"[PHASE] Relic baru: '{relic['name']}' di Map {relic['map']}")
                     print(f"[PHASE] Portal Resi baru di Map {portal['map']}")
+
+                    # ── Cek apakah mini boss harus muncul di round ini ──────
+                    if (current_round == miniboss_round
+                            and not miniboss_triggered
+                            and current_round in (1, 2, 3)):
+                        miniboss_triggered = True
+                        print(f"[MINIBOSS] ⚔  MINI BOSS BATTLE! Round {current_round}  ⚔")
+                        mb_result = miniboss_fight_loop(current_round)
+                        if mb_result == "player_died":
+                            # full_reset + state="select" sudah dilakukan di dalam
+                            return
+                        elif mb_result == "menu":
+                            state = "menu"
+                            return
+                        # mb_result == "victory" → lanjut ke explore
+
                     start_explore()
+
                 else:
+                    # ── Explore phase selesai → round bertambah ─────────────
+                    current_round += 1
+                    print(f"[PHASE] Explore selesai. Masuk Round {current_round}.")
                     start_lobby()
 
         # ================= EVENTS =================
@@ -1870,48 +2197,11 @@ def game_loop():
                 water_count += 1
                 enemy.just_died = False
 
-        # ================= COVENANT NPC INTERACTION ==========
-        if covenant_npc.visible and covenant_npc.map_id == current_bg:
-            # Update ritual timer → mungkin spawn Enemy2 punishment
-            new_punish = ritual_system.update(player, enemies, water_count)
-            for pe in new_punish:
-                enemies.add(pe)
-
-            # Cek interaksi player dengan NPC
-            if covenant_npc.near_player(player) and pressed_e and not show_interact:
-                if not ritual_system.covenant_made:
-                    # Belum ada perjanjian — tampilkan dialog perjanjian
-                    result = do_covenant_dialog(
-                        screen, clock, FPS, pixel_font, small_font)
-                    if result == "accept":
-                        ritual_system.covenant_made = True
-                        # Buff player: +20 max HP, +1 damage
-                        player.max_health += 20
-                        player.health     = min(player.health + 20, player.max_health)
-                        player.damage     += 1
-                        # Mulai timer ritual
-                        covenant_npc.place_random(map_id=1)
-                        ritual_system.start_timer()
-                        print("[COVENANT] Perjanjian diterima! HP+20, Damage+1")
-                else:
-                    # Perjanjian sudah ada — cek ritual siram pohon
-                    if covenant_npc.near_tree(player):
-                        used = do_ritual_minigame(
-                            screen, clock, FPS, pixel_font, small_font, water_count)
-                        if used > 0:
-                            water_count -= used
-                            ritual_system.reset_timer()
-                            print(f"[RITUAL] Berhasil! Timer direset. Air sisa: {water_count}")
-
-        # ================= ENEMY ATTACK =================
-        for enemy in enemies:
-            atk = enemy.get_attack_hitbox()
-            if atk and atk.colliderect(player.rect):
-                # Punishment enemy punya damage lebih tinggi
-                dmg = getattr(enemy, "_punishment_damage", 1)
-                player.take_damage(dmg)
-
         # ================= PORTAL INTERACTION =================
+        # (Dipindah ke ATAS covenant section karena show_interact dipakai
+        # di sana — sebelumnya didefinisikan di BAWAH, menyebabkan
+        # UnboundLocalError setiap kali masuk fight phase dan game loop
+        # crash sebelum sempat menggambar apapun.)
         show_interact = False
         pending_map   = None
         portal_open   = (phase == "explore")
@@ -1962,6 +2252,64 @@ def game_loop():
                     show_interact = True
                     pending_map   = 2
                     break
+
+        # ================= COVENANT NPC INTERACTION ========================
+        # Interaksi bisa terjadi di phase MANAPUN selama NPC sedang visible —
+        # sebelum perjanjian dibuat, NPC ada di explore phase; sesudahnya,
+        # NPC pindah ke fight phase. ritual_system.update() (yang men-spawn
+        # punishment enemy) hanya relevan SETELAH perjanjian dibuat & timer
+        # berjalan, jadi itu tetap dibatasi ke fight phase saja.
+        if covenant_npc.visible:
+            if phase == "lobby" and ritual_system.covenant_made:
+                # Update ritual timer → mungkin spawn Enemy2 punishment
+                new_punish = ritual_system.update(player, enemies, water_count)
+                for pe in new_punish:
+                    enemies.add(pe)
+
+            # Cek interaksi player dengan NPC (show_interact sudah ada di atas)
+            if covenant_npc.near_player(player) and pressed_e and not show_interact:
+                if not ritual_system.covenant_made:
+                    # Belum ada perjanjian — tampilkan dialog perjanjian
+                    result = do_covenant_dialog(
+                        screen, clock, FPS, pixel_font, small_font)
+                    if result == "accept":
+                        ritual_system.covenant_made = True
+                        # Buff player: +20 max HP, +1 damage
+                        player.max_health += 20
+                        player.health     = min(player.health + 20, player.max_health)
+                        player.damage     += 1
+                        # Perjanjian diterima — NPC pindah ke fight phase MULAI
+                        # SAAT INI (langsung disembunyikan dari explore yang
+                        # sedang berjalan; baru benar-benar muncul lagi nanti
+                        # saat start_lobby() dipanggil)
+                        covenant_npc.hide()
+                        if phase == "lobby":
+                            covenant_npc.place_random(map_id=1)
+                            ritual_system.start_timer()
+                        print("[COVENANT] Perjanjian diterima! HP+20, Damage+1")
+                else:
+                    # Perjanjian sudah ada — cek ritual siram pohon
+                    if covenant_npc.near_tree(player):
+                        used = do_ritual_minigame(
+                            screen, clock, FPS, pixel_font, small_font, water_count)
+                        if used > 0:
+                            water_count -= used
+                            # kill_punishment() bukan cuma reset timer —
+                            # juga menghapus Cindaku yang sedang hidup dari
+                            # enemies group dan mengembalikan harimau utama.
+                            # Tanpa ini, Cindaku lama tetap menyerang player
+                            # walau pohon sudah disiram, dan Cindaku KEDUA
+                            # bisa ikut spawn begitu timer berikutnya habis.
+                            ritual_system.kill_punishment()
+                            print(f"[RITUAL] Berhasil! Cindaku diusir. Air sisa: {water_count}")
+
+        # ================= ENEMY ATTACK =================
+        for enemy in enemies:
+            atk = enemy.get_attack_hitbox()
+            if atk and atk.colliderect(player.rect):
+                # Punishment enemy punya damage lebih tinggi
+                dmg = getattr(enemy, "_punishment_damage", 1)
+                player.take_damage(dmg)
 
         # ================= RELIC PICKUP =================
         near_relic = False
@@ -2017,10 +2365,6 @@ def game_loop():
                 bg_game    = bg_map5
                 current_bg = 5
                 player.rect.center = BG5_SPAWN_POS
-            # Spawn NPC di map baru saat explore phase (hanya sebelum perjanjian)
-            if phase == "explore" and not ritual_system.covenant_made:
-                covenant_npc.place_random(map_id=current_bg)
-                covenant_npc.tiger_hidden = False
 
         # ================= ENEMY RESPAWN (lobby only) =================
         if phase == "lobby":
@@ -2039,16 +2383,18 @@ def game_loop():
         for enemy in enemies:
             enemy.draw_healthbar(screen)
 
-        # Covenant NPC (pohon + harimau) — fight phase & explore phase
-        if covenant_npc.visible and covenant_npc.map_id == current_bg:
-            covenant_npc.draw(screen)
-            near_tree_for_ritual = (ritual_system.covenant_made and
-                                    covenant_npc.near_tree(player))
-            covenant_npc.draw_prompt(
-                screen, player, small_font, GOLD, WHITE,
-                covenant_made=ritual_system.covenant_made,
-                near_tree=near_tree_for_ritual,
-            )
+        # Covenant NPC (pohon + harimau) — muncul di phase manapun dia
+        # sedang ditempatkan (explore sebelum perjanjian, fight sesudahnya).
+        # CovenantNPC.draw()/draw_prompt() sudah punya guard internal
+        # `if not self.visible: return`, jadi aman dipanggil tanpa gate phase.
+        covenant_npc.draw(screen)
+        near_tree_for_ritual = (ritual_system.covenant_made and
+                                covenant_npc.near_tree(player))
+        covenant_npc.draw_prompt(
+            screen, player, small_font, GOLD, WHITE,
+            covenant_made=ritual_system.covenant_made,
+            near_tree=near_tree_for_ritual,
+        )
 
         # ← RELIC & PORTAL RESI DIGAMBAR DI SINI
         draw_relic()
@@ -2104,7 +2450,7 @@ def game_loop():
         if phase == "explore":
             map_btn_rect = pygame.Rect(WIDTH - 110, HEIGHT - 48, 100, 36)
             map_mouse_hov = map_btn_rect.collidepoint(pygame.mouse.get_pos())
-            _draw_menu_btn(screen, small_font, "🗺  MAP", map_btn_rect, map_mouse_hov)
+            _draw_menu_btn(screen, emoji_font_s, "🗺  MAP", map_btn_rect, map_mouse_hov)
 
             # Cek klik mouse pada tombol MAP
             for _ev in pygame.event.get(pygame.MOUSEBUTTONDOWN):
@@ -2119,7 +2465,7 @@ def game_loop():
             if pressed_m:
                 show_map_overlay(current_bg)
 
-        # ── Tombol BOOST / ULTIMATE / RAGE (khusus Archer/Arjuna) ──────
+        # ── Tombol BOOST / ULTIMATE / RAGE (semua karakter) ─────────────
         # Tengah bawah layar — tetap kelihatan di kedua fase (lobby & explore).
         # Tombol yang SAMA berubah fungsi tergantung state:
         #   1. "🔥 AKTIF!"  — ultimate biasa sedang berjalan
@@ -2144,7 +2490,7 @@ def game_loop():
             else:
                 boost_label = "⚡ ULT"
 
-            _draw_menu_btn(screen, small_font, boost_label, boost_btn_rect, boost_hover)
+            _draw_menu_btn(screen, emoji_font_s, boost_label, boost_btn_rect, boost_hover)
 
             if boost_pressed:
                 if in_rage_window and hasattr(player, "activate_rage"):
@@ -2157,7 +2503,7 @@ def game_loop():
         # because draw() is not called at all in main_menu() or character_select().
         mobile_controls.draw(screen, show_pause=True)
 
-        # Banner "Boost!" ultimate Arjuna / "RAGE!" — digambar paling akhir
+        # Banner "Boost!" / "RAGE!" — digambar paling akhir supaya muncul
         # supaya muncul di atas semua elemen lain (HUD, mobile controls, dll).
         if hasattr(player, "draw_ultimate_banner"):
             player.draw_ultimate_banner(screen)

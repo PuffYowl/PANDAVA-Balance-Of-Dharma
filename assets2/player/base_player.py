@@ -1,5 +1,6 @@
 import pygame
 import os
+import random
 
 def load_frames(folder, scale=1):
 
@@ -20,7 +21,44 @@ def load_frames(folder, scale=1):
 
             frames.append(img)
 
-    return frames
+    return normalize_frame_sizes(frames)
+
+
+def normalize_frame_sizes(frames):
+    """
+    Menyamakan ukuran kanvas semua frame dalam list ke ukuran terbesar
+    (lebar & tinggi maksimum di antara semua frame), supaya animasi
+    tidak kelihatan "ganti-ganti ukuran" saat pindah frame.
+
+    Setiap frame ditempatkan di tengah-bawah (midbottom) kanvas baru,
+    jadi kaki karakter tetap menempel di posisi yang sama, tidak
+    melar/distort, hanya ditambah ruang transparan di sekitarnya.
+    """
+
+    if not frames:
+        return frames
+
+    max_w = max(f.get_width() for f in frames)
+    max_h = max(f.get_height() for f in frames)
+
+    normalized = []
+
+    for f in frames:
+
+        canvas = pygame.Surface((max_w, max_h), pygame.SRCALPHA)
+
+        fw, fh = f.get_size()
+
+        # Tempel di tengah secara horizontal, rapat ke bawah secara
+        # vertikal (anggap "kaki" karakter ada di bagian bawah frame).
+        pos_x = (max_w - fw) // 2
+        pos_y = max_h - fh
+
+        canvas.blit(f, (pos_x, pos_y))
+
+        normalized.append(canvas)
+
+    return normalized
 
 # ================= SPRITESHEET LOADER =================
 def load_spritesheet_row(path, frame_count, scale=1):
@@ -119,7 +157,27 @@ class BasePlayer(pygame.sprite.Sprite):
                     "attack": load_frames(f"{assets_folder}/Attack", 0.2),
 
                 }
-    
+
+            elif assets_folder == 'assets2/player_nakula':
+
+                self.animations = {
+                    
+                    "idle": load_frames(f"{assets_folder}/Idle", 0.18),
+                    "walk": load_frames(f"{assets_folder}/Walk", 0.06),
+                    "dash": load_frames(f"{assets_folder}/Dash", 0.18),
+                    "attack": load_frames(f"{assets_folder}/Attack", 0.4),
+                }
+
+            elif assets_folder == 'assets2/player_sadewa':
+
+                self.animations = {
+                    
+                    "idle": load_frames(f"{assets_folder}/Idle", 0.18),
+                    "walk": load_frames(f"{assets_folder}/Walk", 0.18),
+                    "dash": load_frames(f"{assets_folder}/Dash", 0.18),
+                    "attack": load_frames(f"{assets_folder}/Attack", 0.4),
+                }
+
         self.state = "idle"
         self.frame_index = 0
         self.anim_speed = 0.05
@@ -140,11 +198,7 @@ class BasePlayer(pygame.sprite.Sprite):
         self.dash_timer = 0
         self.dash_duration = 10
         self.dash_cooldown = 40
-        # Arah dash sebagai vektor (dx, dy) ter-normalisasi, ditentukan
-        # saat dash MULAI berdasarkan tombol arah yang sedang ditahan.
-        # Default (1, 0) artinya dash horizontal mengikuti facing, sama
-        # seperti perilaku sebelumnya kalau tidak ada tombol atas/bawah
-        # yang ditahan saat dash dipicu.
+        
         self.dash_dir_x = 1
         self.dash_dir_y = 0
 
@@ -160,9 +214,62 @@ class BasePlayer(pygame.sprite.Sprite):
         # DAMAGE
         self.damage = 1
 
+        # ================= ULTIMATE / BOOST (semua karakter) =================
+        self.ultimate_damage_mult    = 1.8     # pengali damage selama boost aktif
+        self.ultimate_speed_mult     = 1.5     # pengali speed selama boost aktif
+        self.ultimate_duration       = 300     # lama boost aktif (frame, ±5 detik @60fps)
+        self.ultimate_cooldown_time  = 600     # cooldown sebelum bisa dipakai lagi (±10 detik)
+        self.ultimate_banner_time    = 120     # lama banner tampil di layar (±2 detik)
+        self.ultimate_fade_frames    = 20      # durasi fade-out di akhir tampilnya banner
+        self.ultimate_banner_margin  = 16      # jarak banner dari tepi kiri layar
+        self.ultimate_shake_amount   = 3       # besar goyangan banner (px)
+        self.ultimate_banner_max_w   = 260     # lebar maksimum banner setelah di-scale
+
+        self.ultimate_active         = False
+        self.ultimate_timer          = 0
+        self.ultimate_cooldown_timer = 0
+        self.ultimate_banner_timer   = 0
+
+        # Stat sebelum boost disimpan SAAT diaktifkan (bukan dari __init__),
+        # supaya upgrade permanen dari Resi tidak ke-reset waktu boost habis.
+        self._pre_ultimate_damage = self.damage
+        self._pre_ultimate_speed  = self.speed
+        self._ultimate_key_prev   = False
+
+        # Banner di-load LAZY (baru di-load pertama kali benar-benar mau
+        # digambar) supaya kalau asetnya belum ada, game tidak langsung
+        # crash saat karakter dibuat — baru error saat ultimate/RAGE
+        # pertama kali dipakai, dengan pesan yang lebih jelas.
+        self.ultimate_banner_img = None
+        self.rage_banner_img     = None
+
+        # ================= RAGE (window bonus setelah cooldown ULT habis) =====
+        # Setiap kali cooldown ultimate BIASA habis, ada window RAGE selama
+        # rage_window_duration (±5 detik). Selama window ini, tombol ULT yang
+        # sama (lihat main.py) berubah jadi tombol "RAGE!" — kalau dipencet,
+        # boost yang didapat LEBIH BESAR daripada ultimate biasa, tapi honor
+        # (dharma/adharma) player TURUN sebesar rage_honor_penalty setiap
+        # pemakaian (lihat self.honor_system, di-attach dari main.py seperti
+        # mobile_controls).
+        self.rage_damage_mult     = 2.5    # pengali damage selama RAGE aktif (> ultimate biasa)
+        self.rage_speed_mult      = 2.0    # pengali speed selama RAGE aktif (> ultimate biasa)
+        self.rage_window_duration = 300    # lama window RAGE tersedia (frame, ±5 detik @60fps)
+        self.rage_honor_penalty   = 15     # adharma yang ditambah (honor TURUN) per pemakaian RAGE
+
+        self.rage_window_active  = False   # True selama window 5 detik tersedia
+        self.rage_window_timer   = 0
+        self.rage_active         = False   # True selama efek RAGE sedang berjalan (boost aktif)
+        self.rage_timer          = 0
+        self.rage_banner_timer   = 0
+
+        # honor_system di-attach dari main.py (pola sama seperti
+        # self.mobile_controls) — boleh None kalau belum di-attach, supaya
+        # activate_rage() tidak crash kalau dipanggil sebelum di-set.
+        self.honor_system = None
+
     def input(self):
         keys = pygame.key.get_pressed()
-        mc = self.mobile_controls   # bisa None kalau belum di-set
+        mc = self.mobile_controls   
  
         dx = 0
         dy = 0
@@ -189,10 +296,6 @@ class BasePlayer(pygame.sprite.Sprite):
             self.anim_speed = 5
  
  
-        # Baca tombol arah LEBIH AWAL (sebelum cek dash), supaya kalau
-        # dash baru mau dipicu di frame ini, kita tahu arah mana yang
-        # sedang ditahan untuk menentukan arah dash (atas/bawah/diagonal),
-        # bukan cuma horizontal seperti sebelumnya.
         move_left  = keys[pygame.K_a] or (mc and mc.move_left)
         move_right = keys[pygame.K_d] or (mc and mc.move_right)
         move_up    = keys[pygame.K_w] or (mc and mc.move_up)
@@ -207,10 +310,7 @@ class BasePlayer(pygame.sprite.Sprite):
             self.dash_timer = self.dash_duration
             self.state = "dash"
 
-            # Tentukan arah dash dari tombol yang sedang ditahan SAAT
-            # dash dipicu. Kalau tidak ada arah yang ditahan (atau hanya
-            # menahan arah horizontal), dash tetap mengikuti facing
-            # seperti sebelumnya — jadi perilaku lama tidak berubah.
+            
             dir_x = 0
             dir_y = 0
             if move_left:
@@ -388,10 +488,210 @@ class BasePlayer(pygame.sprite.Sprite):
             self.health -= amount
             self.hit_cooldown = 20
 
+    # ================= ULTIMATE / BOOST (semua karakter) =================
+    def activate_ultimate(self):
+        """Aktifkan boost ultimate. Return True kalau berhasil aktif,
+        False kalau masih cooldown atau sedang aktif."""
+
+        if self.ultimate_active or self.ultimate_cooldown_timer > 0:
+            return False
+
+        self.ultimate_active       = True
+        self.ultimate_timer        = self.ultimate_duration
+        self.ultimate_banner_timer = self.ultimate_banner_time
+
+        self._pre_ultimate_damage = self.damage
+        self._pre_ultimate_speed  = self.speed
+
+        self.damage = self._pre_ultimate_damage * self.ultimate_damage_mult
+        self.speed  = self._pre_ultimate_speed  * self.ultimate_speed_mult
+
+        return True
+
+    # ================= RAGE =================
+    def activate_rage(self):
+        """Aktifkan boost RAGE — hanya bisa dipakai SELAMA window RAGE
+        terbuka (rage_window_active, beberapa detik setelah cooldown
+        ultimate biasa habis). Boost yang didapat lebih besar dari ultimate
+        biasa (rage_damage_mult, rage_speed_mult), TAPI honor player turun
+        (adharma naik) sebesar rage_honor_penalty setiap pemakaian.
+
+        Return True kalau berhasil aktif, False kalau window RAGE sedang
+        tidak terbuka atau ultimate/RAGE lain sedang aktif."""
+
+        if not self.rage_window_active:
+            return False
+        if self.ultimate_active or self.rage_active:
+            return False
+
+        self.rage_window_active = False   # window dipakai, tutup sekarang
+        self.rage_window_timer  = 0
+
+        self.rage_active       = True
+        self.rage_timer        = self.ultimate_duration   # durasi sama seperti ultimate biasa
+        self.rage_banner_timer = self.ultimate_banner_time
+
+        self._pre_ultimate_damage = self.damage
+        self._pre_ultimate_speed  = self.speed
+
+        self.damage = self._pre_ultimate_damage * self.rage_damage_mult
+        self.speed  = self._pre_ultimate_speed  * self.rage_speed_mult
+
+        # Konsekuensi: adharma naik (honor turun). honor_system di-attach
+        # dari main.py — kalau belum di-attach (None), efek boost tetap
+        # jalan tapi penalti honor di-skip saja (tidak crash).
+        if self.honor_system is not None:
+            self.honor_system.change(-self.rage_honor_penalty)
+
+        return True
+
+    def update_ultimate(self):
+        """Tracking timer ultimate/RAGE + deteksi tombol U. Dipanggil
+        otomatis tiap frame dari BasePlayer.update(), jadi SEMUA karakter
+        anak BasePlayer otomatis dapat fitur ini tanpa perlu menulis ulang
+        kode yang sama di tiap file karakter."""
+
+        keys = pygame.key.get_pressed()
+        mc = self.mobile_controls
+        ultimate_key_down = keys[pygame.K_u] or bool(mc and getattr(mc, "ultimate", False))
+
+        if ultimate_key_down and not self._ultimate_key_prev:
+            if self.rage_window_active:
+                self.activate_rage()
+            else:
+                self.activate_ultimate()
+        self._ultimate_key_prev = ultimate_key_down
+
+        if self.ultimate_active:
+            self.ultimate_timer -= 1
+            if self.ultimate_timer <= 0:
+                # Boost selesai → kembalikan damage/speed ke nilai sebelum boost
+                self.damage = self._pre_ultimate_damage
+                self.speed  = self._pre_ultimate_speed
+                self.ultimate_active        = False
+                self.ultimate_cooldown_timer = self.ultimate_cooldown_time
+
+        if self.ultimate_cooldown_timer > 0:
+            self.ultimate_cooldown_timer -= 1
+            if self.ultimate_cooldown_timer <= 0:
+                # Cooldown ultimate biasa baru SAJA habis -> buka window
+                # RAGE. Tidak terjadi kalau RAGE sendiri sedang aktif
+                # (activate_rage juga menyetel ultimate_cooldown_timer,
+                # jadi window tidak akan langsung dibuka lagi sebelum
+                # efek RAGE selesai).
+                if not self.rage_active:
+                    self.rage_window_active = True
+                    self.rage_window_timer  = self.rage_window_duration
+
+        if self.rage_window_active:
+            self.rage_window_timer -= 1
+            if self.rage_window_timer <= 0:
+                self.rage_window_active = False
+
+        if self.rage_active:
+            self.rage_timer -= 1
+            if self.rage_timer <= 0:
+                # Efek RAGE selesai → kembalikan damage/speed ke nilai
+                # sebelum RAGE diaktifkan, lalu masuk cooldown.
+                self.damage = self._pre_ultimate_damage
+                self.speed  = self._pre_ultimate_speed
+                self.rage_active            = False
+                self.ultimate_cooldown_timer = self.ultimate_cooldown_time
+
+        if self.ultimate_banner_timer > 0:
+            self.ultimate_banner_timer -= 1
+
+        if self.rage_banner_timer > 0:
+            self.rage_banner_timer -= 1
+
+    def _load_banner_image(self, candidates, max_w):
+        """Coba load gambar banner dari beberapa kemungkinan path (jaga-jaga
+        kalau ekstensi file beda, mis. .png vs .jpeg/.jpg). Pakai yang
+        pertama ketemu, lalu di-scale supaya lebarnya tidak melebihi max_w."""
+
+        img = None
+        last_err = None
+        for path in candidates:
+            try:
+                img = pygame.image.load(path).convert()
+                break
+            except (pygame.error, FileNotFoundError) as e:
+                last_err = e
+                continue
+
+        if img is None:
+            raise FileNotFoundError(
+                f"Banner tidak ditemukan di salah satu path berikut: {candidates}. "
+                f"Error terakhir: {last_err}"
+            )
+
+        if img.get_width() > max_w:
+            ratio = max_w / img.get_width()
+            new_size = (int(img.get_width() * ratio), int(img.get_height() * ratio))
+            img = pygame.transform.smoothscale(img, new_size)
+
+        return img
+
+    def _draw_shaking_banner(self, surface, img, timer):
+        """Gambar satu banner di samping kiri layar dengan sedikit efek
+        shake + fade-out di akhir. Dipakai bareng oleh draw_ultimate_banner
+        dan draw_rage_banner supaya logikanya tidak diduplikasi."""
+
+        shake_x = random.randint(-self.ultimate_shake_amount, self.ultimate_shake_amount)
+        shake_y = random.randint(-self.ultimate_shake_amount, self.ultimate_shake_amount)
+
+        img_rect = img.get_rect(
+            midleft=(self.ultimate_banner_margin, surface.get_height() // 2)
+        )
+        img_rect.x += shake_x
+        img_rect.y += shake_y
+
+        if timer <= self.ultimate_fade_frames:
+            alpha   = int(255 * (timer / self.ultimate_fade_frames))
+            banner  = img.copy()
+            banner.set_alpha(alpha)
+            surface.blit(banner, img_rect)
+        else:
+            surface.blit(img, img_rect)
+
+    def draw_ultimate_banner(self, surface):
+        """Gambar banner 'Boost!' di samping kiri layar selagi ultimate
+        baru aktif, dengan efek shake. Panggil dari main.py, idealnya
+        sebelum pygame.display.flip() supaya tampil di atas elemen lain."""
+
+        if self.ultimate_banner_timer <= 0:
+            return
+
+        if self.ultimate_banner_img is None:
+            self.ultimate_banner_img = self._load_banner_image(
+                ["assets2/boost_banner.png", "assets2/boost_banner.jpeg", "assets2/boost_banner.jpg"],
+                self.ultimate_banner_max_w,
+            )
+
+        self._draw_shaking_banner(surface, self.ultimate_banner_img, self.ultimate_banner_timer)
+
+    def draw_rage_banner(self, surface):
+        """Gambar banner 'RAGE!' di samping kiri layar selagi RAGE baru
+        aktif. Posisi, ukuran, dan efek shake sama seperti
+        draw_ultimate_banner, hanya gambar & timer-nya yang beda."""
+
+        if self.rage_banner_timer <= 0:
+            return
+
+        if self.rage_banner_img is None:
+            self.rage_banner_img = self._load_banner_image(
+                ["assets2/rage_banner.png", "assets2/rage_banner.jpeg", "assets2/rage_banner.jpg"],
+                self.ultimate_banner_max_w,
+            )
+
+        self._draw_shaking_banner(surface, self.rage_banner_img, self.rage_banner_timer)
+
     def update(self):
 
         if self.hit_cooldown > 0:
          self.hit_cooldown -= 1
+
+        self.update_ultimate()
 
         self.input()
 

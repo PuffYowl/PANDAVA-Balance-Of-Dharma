@@ -63,6 +63,16 @@ class CovenantNPC:
 
         self.visible      = False
         self.tiger_hidden = False   # True saat Enemy2 punishment aktif di map
+
+        # True kalau NPC sedang ditempatkan di fight phase (map_id == 1).
+        # Di fight phase, hanya POHON yang boleh tampil — harimau utama
+        # (sosok "baik" sebelum perjanjian) tidak ikut digambar di sana,
+        # karena setelah perjanjian dibuat, kehadiran fisik Cindaku di
+        # fight phase cuma berupa Cindaku punishment (musuh), bukan sosok
+        # NPC ramahnya. Ini independen dari tiger_hidden (yang khusus
+        # menyembunyikan harimau saat Cindaku punishment sedang aktif).
+        self.is_fight_phase_placement = False
+
         self.map_id    = 1
         self.cx        = 0    # center x titik spawn (antara pohon dan harimau)
         self.cy        = 0
@@ -80,6 +90,9 @@ class CovenantNPC:
         self.cy      = cy
         self.map_id  = map_id
         self.visible = True
+        # map_id == 1 selalu berarti fight phase (lihat start_lobby() di
+        # main.py) — set flag supaya draw() tahu untuk sembunyikan harimau.
+        self.is_fight_phase_placement = (map_id == 1)
         self._update_rects()
 
     def place_random(self, map_id: int = 1):
@@ -122,10 +135,16 @@ class CovenantNPC:
         if not self.visible:
             return
         self._pulse = (self._pulse + 2) % 360
-        # Pohon selalu digambar
+        # Pohon selalu digambar — di fight phase maupun explore phase.
         screen.blit(self.tree_img, self.tree_rect.topleft)
-        # Harimau hanya muncul kalau tidak sedang bersembunyi (Enemy2 belum spawn)
-        if not self.tiger_hidden:
+        # Harimau utama HANYA digambar di explore phase placement.
+        # Di fight phase, kehadiran fisik Cindaku cuma berupa Cindaku
+        # punishment (musuh terpisah) saat timer ritual habis — bukan
+        # sosok NPC ramahnya, jadi sosok ini disembunyikan total di sana.
+        # tiger_hidden tetap dicek juga supaya logic lama (sembunyi saat
+        # punishment aktif) tidak rusak kalau suatu saat placement di fight
+        # phase ini diubah lagi untuk menampilkan harimau.
+        if not self.is_fight_phase_placement and not self.tiger_hidden:
             screen.blit(self.tiger_img, self.tiger_rect.topleft)
 
     def draw_timer_above_tree(self, screen: pygame.Surface,
@@ -542,6 +561,12 @@ class TreeRitualSystem:
         self.water_consumed  = 0   # main.py baca ini lalu kurangi water_count
         self._active         = False
 
+        # Referensi ke instance Enemy2 punishment yang SEDANG hidup di map.
+        # None kalau tidak ada Cindaku punishment aktif. Dipakai untuk:
+        #   1. Mencegah spawn Cindaku KEDUA selama yang pertama belum mati.
+        #   2. Membunuh/menghapus Cindaku begitu ritual berhasil disiram.
+        self.active_punishment = None
+
     def start_timer(self):
         """Panggil di awal setiap fight phase kalau covenant sudah dibuat."""
         self.timer_frames = self.TIMER_SECS * self.fps
@@ -555,6 +580,23 @@ class TreeRitualSystem:
         """Panggil saat masuk explore phase."""
         self._active = False
 
+    def kill_punishment(self):
+        """
+        Panggil setelah ritual (siram pohon) berhasil. Menghapus Cindaku
+        punishment yang sedang hidup dari layar/enemies group, mengembalikan
+        harimau utama supaya terlihat lagi, dan mereset timer 15 detik.
+
+        Tanpa ini, Cindaku lama akan terus hidup & menyerang walau player
+        sudah menyiram pohon — dan begitu timer 15 detik berikutnya habis,
+        Cindaku KEDUA akan ikut spawn karena tidak ada pengecekan apakah
+        yang lama sudah mati atau belum.
+        """
+        if self.active_punishment is not None:
+            self.active_punishment.kill()   # hapus dari semua sprite group
+            self.active_punishment = None
+        self.npc.tiger_hidden = False        # harimau utama muncul lagi
+        self.reset_timer()
+
     def update(self, player, enemies: pygame.sprite.Group,
                water_count: int) -> list:
         """
@@ -564,19 +606,47 @@ class TreeRitualSystem:
         if not self._active or not self.covenant_made:
             return []
 
+        # Kalau Cindaku punishment sebelumnya sudah benar-benar hilang dari
+        # sprite group (mati lewat combat normal & animasi matinya selesai
+        # lalu .kill() terpanggil via override respawn()), bersihkan
+        # referensinya supaya harimau utama bisa muncul kembali.
+        #
+        # PENTING: kita TIDAK bisa pakai self.active_punishment.alive()
+        # (method bawaan pygame.sprite.Sprite) di sini — Enemy2.__init__
+        # melakukan `self.alive = True/False` (boolean), yang SHADOW total
+        # method alive() bawaan pygame dengan atribut boolean biasa. Jadi
+        # `instance.alive` di sini selalu boolean, BUKAN method — memanggil
+        # `.alive()` akan crash dengan "TypeError: 'bool' object is not
+        # callable". Sebagai gantinya kita cek langsung apakah instance ini
+        # masih ada di `enemies` group yang dikirim sebagai parameter,
+        # menggunakan operator pygame.sprite.Group `in` yang aman dipakai
+        # terlepas dari shadowing apapun pada method/atribut instance-nya.
+        if (self.active_punishment is not None and
+                self.active_punishment not in enemies):
+            self.active_punishment = None
+            self.npc.tiger_hidden = False
+
         new_enemies = []
 
         self.timer_frames -= 1
         if self.timer_frames <= 0:
-            # Spawn Enemy2 punishment — harimau menghilang
+            # JANGAN spawn Cindaku kedua kalau yang sebelumnya masih hidup.
+            # Timer tetap direset supaya tidak langsung re-trigger frame
+            # berikutnya, tapi tidak ada enemy baru yang ditambahkan.
+            if self.active_punishment is not None:
+                self.reset_timer()
+                return []
+
+            # Spawn Enemy2 punishment — harimau utama menghilang
             ex = random.choice([80, WIDTH_FALLBACK - 80])
             ey = random.randint(100, 440)
             e  = _make_punishment_enemy(ex, ey,
                                         self.PENALTY_HP, self.PENALTY_DMG)
             new_enemies.append(e)
-            self.npc.tiger_hidden = True   # harimau bersembunyi saat punishment aktif
+            self.active_punishment = e     # simpan referensi instance ini
+            self.npc.tiger_hidden  = True   # harimau bersembunyi saat punishment aktif
             self.reset_timer()
-            print("[SACRED TREE] Ritual terlewat — Enemy2 punishment muncul!")
+            print("[SACRED TREE] Ritual terlewat — Cindaku punishment muncul!")
 
         return new_enemies
 
@@ -596,7 +666,16 @@ class TreeRitualSystem:
 WIDTH_FALLBACK = 960   # fallback kalau main.py tidak pass WIDTH
 
 def _make_punishment_enemy(x: int, y: int, hp: int, dmg: int):
-    """Buat Enemy2 dengan HP dan damage yang dinaikkan."""
+    """
+    Buat Enemy2 dengan HP dan damage yang dinaikkan.
+
+    Enemy2 standar punya auto-respawn (mati → animasi → hidup lagi sendiri
+    di posisi random 2 detik kemudian). Untuk instance punishment ini kita
+    OVERRIDE respawn() supaya begitu animasi mati selesai, dia benar-benar
+    .kill() permanen (hilang dari sprite group) alih-alih hidup lagi —
+    karena seharusnya Cindaku punishment cuma hilang lewat ritual sukses
+    ATAU mati lewat combat, bukan respawn otomatis sendiri.
+    """
     from enemy2 import Enemy2
     e           = Enemy2(x, y)
     e.max_health = hp
@@ -607,4 +686,11 @@ def _make_punishment_enemy(x: int, y: int, hp: int, dmg: int):
     # saat menghitung damage ke player.
     e._punishment_damage = dmg
     e._is_punishment     = True
+
+    # Override respawn() instance ini saja (tidak mengubah class Enemy2
+    # secara global, jadi enemy biasa tetap auto-respawn seperti biasa).
+    def _respawn_override():
+        e.kill()   # hapus permanen dari semua sprite group
+    e.respawn = _respawn_override
+
     return e
