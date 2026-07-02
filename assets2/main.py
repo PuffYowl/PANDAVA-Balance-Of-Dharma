@@ -13,6 +13,7 @@ from player.nakula import Nakula
 from player.sadewa import Sadewa
 from enemy1 import Enemy
 from enemy2 import Enemy2
+from miniboss1 import Miniboss_1
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
 from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura, UpgradeAura, HonorSystem
@@ -529,7 +530,7 @@ def tutorial_screen():
     tf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 38)
     sf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
     hf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 18)
-
+# hehehe boiii sigma ohio grimace shake sigma yo el teach
     lines = [
         ("PANDAVA — BALANCE OF DHARMA", True),
         ("", False),
