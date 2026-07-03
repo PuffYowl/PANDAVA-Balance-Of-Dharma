@@ -100,8 +100,18 @@ CHARACTER_REGISTRY = {
     },
     "Hammer": {
         "display_name": "Hammer",
-        "portrait_path": None,
+        "portrait_path": 'assets2/portraits/bima_portrait.png',
         "color": (180, 70, 70),
+    },
+    "Nakula": {
+        "display_name": "Nakula",
+        "portrait_path": 'assets2/portraits/nakula_portrait.png',
+        "color": (70, 70, 180),
+    },
+    "Sadewa": {
+        "display_name": "Sadewa",
+        "portrait_path": 'assets2/portraits/sadewa_portrait.png',
+        "color": (70, 180, 70),
     },
 }
 

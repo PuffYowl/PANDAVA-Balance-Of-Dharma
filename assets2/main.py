@@ -1440,10 +1440,11 @@ def character_select_from_pause():
     switching state directly — so game_loop stays in control of what happens next.
     Returns None if the player presses ESC to go back to the pause menu."""
     options = [
-        {"class": Archer,  "card": card_arjuna,    "name": "Arjuna"},
-        {"class": Spear,   "card": card_yudhistira, "name": "Yudhistira"},
-        {"class": Hammer,  "card": card_bima,       "name": "Bima"},
-        {"class": Assasin, "card": card_yudhistira, "name": "Assasin"},
+        {"class": Archer,  "card": card_arjuna,     "name": "Arjuna"},
+        {"class": Spear,   "card": card_yudhistira,  "name": "Yudhistira"},
+        {"class": Hammer,  "card": card_bima,        "name": "Bima"},
+        {"class": Nakula, "card": card_nakula,  "name": "Nakula"},
+        {"class": Sadewa, "card": card_sadewa,  "name": "Sadewa"}
     ]
     selected  = 0
     sel_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
@@ -1721,7 +1722,7 @@ def _draw_boss_healthbar(surface, boss, name_font, hp_font):
     BAR_W = 440
     BAR_H = 26
     BAR_X = WIDTH  // 2 - BAR_W // 2
-    BAR_Y = 18
+    BAR_Y = 100
 
     # Track / background
     pygame.draw.rect(surface, (20,  8,  8), (BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6), border_radius=8)

@@ -61,7 +61,10 @@ ICON_SIZE       = 50    # diperkecil dari 34, dan sekarang ditaruh di bawah stam
 # pixel-art placeholder for that character until you have art ready.
 PORTRAIT_PATHS = {
     "Archer":  "assets2/portraits/archer_portrait.png",
-    "Spear":   "assets2/portraits/spear_portrait.png"
+    "Spear":   "assets2/portraits/spear_portrait.png",
+    "Hammer":  "assets2/portraits/bima_portrait.png",
+    "Nakula":  "assets2/portraits/nakula_portrait.png",
+    "Sadewa":  "assets2/portraits/sadewa_portrait.png"
 }
 
 # Fill this in with your own pixelated water-drop icon path. Leave as

@@ -1,6 +1,6 @@
 import pygame
 from .base_player import load_spritesheet_row 
-from .base_player import BasePlayer, load_frames  
+from .base_player import BasePlayer
 
 
 class Nakula(BasePlayer):
