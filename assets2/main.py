@@ -187,7 +187,7 @@ PURPLE = (180, 80,  255)
 GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 5
+LOBBY_DURATION   = 60
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -210,7 +210,7 @@ water_count = 0
 
 # ================= ROUND & MINIBOSS STATE =================
 current_round      = 1
-miniboss_round     = 5
+miniboss_round     = random.choice([1,2,3])
 miniboss_triggered = False
 print(f"[MINIBOSS] Mini Boss Battle akan muncul di Round {miniboss_round}")
 
@@ -224,7 +224,7 @@ boss_triggered  = False
 # ================= FINAL BOSS (DURYUDANA) STATE =================
 # Sama polanya dengan Dursasana: fixed di Round 5, sekali saja, tidak
 # random & tidak berulang.
-FINAL_BOSS_ROUND     = 2
+FINAL_BOSS_ROUND     = 6
 final_boss_triggered = False
 
 # ================= PLAYER =================
