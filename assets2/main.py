@@ -14,6 +14,8 @@ from player.sadewa import Sadewa
 from enemy1 import Enemy
 from enemy2 import Enemy2
 from miniboss1 import Miniboss_1
+from dursasana import Dursasana
+from duryudana import Duryudana
 from mobile_controls import MobileControls, PAUSE_BTN_SIZE
 from character_registry import broadcast_character
 from dialog_system import DialogBox, RESI_DIALOG_TREE, PRASASTI_BUFFS, PRASASTI_RELIC_REQUIRED, HealingAura, UpgradeAura, HonorSystem
@@ -185,7 +187,7 @@ PURPLE = (180, 80,  255)
 GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 60
+LOBBY_DURATION   = 5
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -208,9 +210,22 @@ water_count = 0
 
 # ================= ROUND & MINIBOSS STATE =================
 current_round      = 1
-miniboss_round     = random.choice([1, 2, 3])
+miniboss_round     = 5
 miniboss_triggered = False
 print(f"[MINIBOSS] Mini Boss Battle akan muncul di Round {miniboss_round}")
+
+# ================= MAIN BOSS (DURSASANA) STATE =================
+# Boss utama TIDAK random — selalu muncul setelah fight phase Round 4
+# selesai, dan hanya SEKALI per playthrough (tidak berulang di round
+# berikutnya).
+BOSS_ROUND      = 4
+boss_triggered  = False
+
+# ================= FINAL BOSS (DURYUDANA) STATE =================
+# Sama polanya dengan Dursasana: fixed di Round 5, sekali saja, tidak
+# random & tidak berulang.
+FINAL_BOSS_ROUND     = 2
+final_boss_triggered = False
 
 # ================= PLAYER =================
 player  = Archer(400, 300)
@@ -1505,7 +1520,7 @@ def restart_from_pause(new_player_class):
     """Switches the player character without resetting the relic.
     Resets enemies and phase timer, spawns player at the default position."""
     global player, players, phase, phase_frames, bg_game, current_bg, enemy_respawn_timer
-    global current_round, miniboss_round, miniboss_triggered
+    global current_round, miniboss_round, miniboss_triggered, boss_triggered, final_boss_triggered
     player = new_player_class(*SPAWN_POS)
     player.mobile_controls = mobile_controls
     player.honor_system    = honor_system
@@ -1525,6 +1540,8 @@ def restart_from_pause(new_player_class):
     current_round      = 1
     miniboss_round     = random.choice([1, 2, 3])
     miniboss_triggered = False
+    boss_triggered      = False
+    final_boss_triggered = False
     print(f"[RESTART] Round reset ke 1. Miniboss baru akan muncul di Round {miniboss_round}")
 
 
@@ -1550,7 +1567,7 @@ def full_reset():
     global enemies, enemy_respawn_timer
     global relic, portal, relic_notif_timer
     global water_count, arrows
-    global current_round, miniboss_round, miniboss_triggered
+    global current_round, miniboss_round, miniboss_triggered, boss_triggered, final_boss_triggered
 
     # Phase & map
     phase        = "lobby"
@@ -1586,6 +1603,8 @@ def full_reset():
     current_round      = 1
     miniboss_round     = random.choice([1, 2, 3])
     miniboss_triggered = False
+    boss_triggered      = False
+    final_boss_triggered = False
     print(f"[FULL RESET] Round reset ke 1. Miniboss baru akan muncul di Round {miniboss_round}")
 
 
@@ -1906,6 +1925,480 @@ def miniboss_fight_loop(round_num):
         pygame.display.flip()
 
 
+# ================= BOSS (DURSASANA): INTRO SCREEN =================
+def boss_intro_screen(round_num):
+    """
+    Layar hitam dengan teks merah 'BOSS FIGHT' yang fade in → tahan → fade out,
+    sama seperti mini boss intro tapi teks & warnanya beda karena ini boss utama.
+    Total durasi ±3.5 detik (210 frame @60fps).
+    """
+    intro_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 72)
+    intro_sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
+
+    FADE_IN  = 60
+    HOLD     = 90
+    FADE_OUT = 60
+    TOTAL    = FADE_IN + HOLD + FADE_OUT
+
+    for frame in range(TOTAL):
+        clock.tick(FPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+        if frame < FADE_IN:
+            alpha = int((frame / FADE_IN) * 255)
+        elif frame < FADE_IN + HOLD:
+            alpha = 255
+        else:
+            alpha = int(((TOTAL - frame) / FADE_OUT) * 255)
+
+        screen.fill((0, 0, 0))
+
+        title_surf = intro_title_font.render("BOSS FIGHT", True, (220, 30, 30))
+        title_surf.set_alpha(alpha)
+        screen.blit(title_surf, title_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40)))
+
+        sub_surf = intro_sub_font.render(
+            f"Dursasana  —  Round {round_num}", True, (200, 160, 80)
+        )
+        sub_surf.set_alpha(alpha)
+        screen.blit(sub_surf, sub_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 46)))
+
+        pygame.display.flip()
+
+
+# ================= BOSS (DURSASANA): BOSS HEALTH BAR =================
+def _draw_dursasana_healthbar(surface, boss, name_font, hp_font):
+    """
+    Health bar besar terpusat di atas layar khusus saat boss fight utama.
+    Sama layoutnya dengan mini boss, cuma label namanya 'Dursasana'.
+    """
+    BAR_W = 440
+    BAR_H = 26
+    BAR_X = WIDTH  // 2 - BAR_W // 2
+    BAR_Y = 100
+
+    # Track / background
+    pygame.draw.rect(surface, (20,  8,  8), (BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6), border_radius=8)
+    pygame.draw.rect(surface, (60, 20, 20), (BAR_X,     BAR_Y,     BAR_W,     BAR_H),       border_radius=6)
+
+    # Fill
+    ratio  = max(0.0, boss.health / boss.max_health)
+    fill_w = int(BAR_W * ratio)
+    if ratio > 0.5:
+        bar_color = (200, 40, 40)
+    elif ratio > 0.25:
+        bar_color = (220, 100, 20)
+    else:
+        bar_color = (255, 50, 20)
+
+    if fill_w > 0:
+        pygame.draw.rect(surface, bar_color, (BAR_X, BAR_Y, fill_w, BAR_H), border_radius=6)
+
+    # Border
+    pygame.draw.rect(surface, (160, 60, 60), (BAR_X, BAR_Y, BAR_W, BAR_H), 2, border_radius=6)
+
+    # HP text di tengah bar
+    hp_text = hp_font.render(f"{max(0, boss.health)} / {boss.max_health}", True, (255, 220, 220))
+    surface.blit(hp_text, hp_text.get_rect(center=(BAR_X + BAR_W // 2, BAR_Y + BAR_H // 2)))
+
+    # Nama boss di atas bar (shadow + label)
+    NAME   = "Dursasana"
+    shadow = name_font.render(NAME, True, (40, 10, 10))
+    label  = name_font.render(NAME, True, (255, 200, 60))
+    surface.blit(shadow, shadow.get_rect(center=(WIDTH // 2 + 2, BAR_Y - 15 + 2)))
+    surface.blit(label,  label.get_rect(center=(WIDTH // 2,      BAR_Y - 15)))
+
+
+# ================= BOSS (DURSASANA): FIGHT LOOP =================
+def dursasana_fight_loop(round_num):
+    """
+    Sama persis alurnya dengan miniboss_fight_loop, cuma pakai class
+    Dursasana, intro screen 'BOSS FIGHT', dan health bar bernama
+    'Dursasana'. Dipanggil sekali saja setelah fight phase Round 4
+    selesai — lihat pengecekan boss_triggered di game_loop().
+
+    Return value:
+      'victory'      — boss kalah, lanjut ke explore
+      'player_died'  — player mati, sudah handle death_screen + full_reset di sini
+      'menu'         — player minta kembali ke main menu
+    """
+    global state
+
+    # ── 1. Tampilkan intro screen ────────────────────────────────────
+    boss_intro_screen(round_num)
+
+    # ── 2. Setup boss & posisi player ───────────────────────────────
+    boss       = Dursasana(WIDTH // 2, HEIGHT // 2 - 30, screen=screen)
+    boss_group = pygame.sprite.Group(boss)
+
+    player.rect.center = (WIDTH // 2, HEIGHT - 140)
+    if hasattr(player, 'x'):
+        player.x = float(player.rect.centerx)
+    if hasattr(player, 'y'):
+        player.y = float(player.rect.centery)
+
+    boss_name_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
+    boss_hp_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    fight_over         = False
+    death_linger_timer = 0    # frame tunggu setelah boss mati
+
+    # ── 3. Fight loop ────────────────────────────────────────────────
+    while True:
+        clock.tick(FPS)
+
+        # Cek kematian player
+        if player.health <= 0:
+            result = death_screen()
+            if result == "quit":
+                pygame.quit(); sys.exit()
+            full_reset()
+            state = "select"
+            return "player_died"
+
+        # Events
+        should_pause = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if dialog_box.active:
+                dialog_box.handle_event(event)
+                continue
+            mobile_controls.handle_event(event)
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    should_pause = True
+
+        mobile_controls.update()
+
+        if mobile_controls.pause_just_pressed:
+            mobile_controls.pause_just_pressed = False
+            should_pause = True
+
+        if should_pause:
+            pm_result, _ = pause_menu()
+            while pm_result == "settings":
+                settings_menu()
+                pm_result, _ = pause_menu()
+            if pm_result == "menu":
+                state = "menu"
+                return "menu"
+            elif pm_result == "select":
+                chosen = character_select_from_pause()
+                if chosen is not None:
+                    restart_from_pause(chosen)
+                    return "player_died"
+
+        # Update player
+        players.update()
+        player.rect.clamp_ip(screen.get_rect())
+
+        # Panah (Archer)
+        if player.spawn_arrow:
+            arrow = Arrow(player.rect.centerx, player.rect.centery, player.facing)
+            arrows.add(arrow)
+            player.spawn_arrow = False
+        arrows.update()
+
+        if not fight_over:
+            boss_group.update(player)
+
+            # Player serang boss
+            if not isinstance(player, Archer):
+                attack_box = player.get_attack_hitbox()
+                if attack_box and boss.rect.colliderect(attack_box):
+                    boss.take_damage(player.facing, player.damage)
+
+            for arrow in list(arrows):
+                if arrow.rect.colliderect(boss.rect):
+                    boss.take_damage(player.facing, player.damage)
+                    arrow.kill()
+
+            # Boss serang player
+            atk = boss.get_attack_hitbox()
+            if atk and atk.colliderect(player.rect):
+                player.take_damage(1)
+
+            # Boss baru saja mati?
+            if boss.just_died:
+                boss.just_died     = False
+                fight_over         = True
+                death_linger_timer = 160   # ±2.7 detik tunggu animasi die selesai
+
+        else:
+            # Terus update biar animasi mati jalan
+            boss_group.update(player)
+            death_linger_timer -= 1
+            if boss.death_done and death_linger_timer <= 0:
+                return "victory"
+
+        # ── Draw ──────────────────────────────────────────────────────
+        screen.blit(bg_arena, (0, 0))
+
+        boss_group.draw(screen)
+        player.draw(screen)
+        arrows.draw(screen)
+
+        # Health bar besar di atas hanya saat boss belum benar-benar mati
+        if not boss.death_done:
+            _draw_dursasana_healthbar(screen, boss, boss_name_font, boss_hp_font)
+
+        # HUD player
+        healing_aura.update_origin(player.rect.centerx, player.rect.top)
+        healing_aura.update()
+        healing_aura.draw(screen)
+
+        player_hud.draw(screen, player.health, player.max_health,
+                        stamina_ratio_from_dash(player), water_count)
+
+        if hasattr(player, "draw_ultimate_banner"):
+            player.draw_ultimate_banner(screen)
+        if hasattr(player, "draw_rage_banner"):
+            player.draw_rage_banner(screen)
+
+        mobile_controls.draw(screen, show_pause=True)
+        pygame.display.flip()
+
+
+# ================= FINAL BOSS (DURYUDANA): INTRO SCREEN =================
+def final_boss_intro_screen(round_num):
+    """
+    Sama seperti boss_intro_screen, cuma teksnya 'FINAL BOSS FIGHT' dan
+    nama-nya 'Duryudana'. Total durasi ±3.5 detik (210 frame @60fps).
+    """
+    intro_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 64)
+    intro_sub_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
+
+    FADE_IN  = 60
+    HOLD     = 90
+    FADE_OUT = 60
+    TOTAL    = FADE_IN + HOLD + FADE_OUT
+
+    for frame in range(TOTAL):
+        clock.tick(FPS)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+
+        if frame < FADE_IN:
+            alpha = int((frame / FADE_IN) * 255)
+        elif frame < FADE_IN + HOLD:
+            alpha = 255
+        else:
+            alpha = int(((TOTAL - frame) / FADE_OUT) * 255)
+
+        screen.fill((0, 0, 0))
+
+        title_surf = intro_title_font.render("FINAL BOSS FIGHT", True, (220, 30, 200))
+        title_surf.set_alpha(alpha)
+        screen.blit(title_surf, title_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40)))
+
+        sub_surf = intro_sub_font.render(
+            f"Duryudana  —  Round {round_num}", True, (200, 160, 80)
+        )
+        sub_surf.set_alpha(alpha)
+        screen.blit(sub_surf, sub_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 46)))
+
+        pygame.display.flip()
+
+
+# ================= FINAL BOSS (DURYUDANA): BOSS HEALTH BAR =================
+def _draw_duryudana_healthbar(surface, boss, name_font, hp_font):
+    """
+    Health bar besar terpusat di atas layar khusus saat final boss fight.
+    Sama layoutnya dengan Dursasana, cuma label namanya 'Duryudana' dan
+    warna aksennya ungu supaya kelihatan beda dari boss sebelumnya.
+    """
+    BAR_W = 440
+    BAR_H = 26
+    BAR_X = WIDTH  // 2 - BAR_W // 2
+    BAR_Y = 100
+
+    # Track / background
+    pygame.draw.rect(surface, (14,  8, 16), (BAR_X - 3, BAR_Y - 3, BAR_W + 6, BAR_H + 6), border_radius=8)
+    pygame.draw.rect(surface, (45, 18, 45), (BAR_X,     BAR_Y,     BAR_W,     BAR_H),       border_radius=6)
+
+    # Fill
+    ratio  = max(0.0, boss.health / boss.max_health)
+    fill_w = int(BAR_W * ratio)
+    if ratio > 0.5:
+        bar_color = (170, 40, 170)
+    elif ratio > 0.25:
+        bar_color = (200, 90, 40)
+    else:
+        bar_color = (255, 50, 60)
+
+    if fill_w > 0:
+        pygame.draw.rect(surface, bar_color, (BAR_X, BAR_Y, fill_w, BAR_H), border_radius=6)
+
+    # Border
+    pygame.draw.rect(surface, (150, 70, 150), (BAR_X, BAR_Y, BAR_W, BAR_H), 2, border_radius=6)
+
+    # HP text di tengah bar
+    hp_text = hp_font.render(f"{max(0, boss.health)} / {boss.max_health}", True, (255, 220, 245))
+    surface.blit(hp_text, hp_text.get_rect(center=(BAR_X + BAR_W // 2, BAR_Y + BAR_H // 2)))
+
+    # Nama boss di atas bar (shadow + label)
+    NAME   = "Duryudana"
+    shadow = name_font.render(NAME, True, (30, 10, 30))
+    label  = name_font.render(NAME, True, (255, 190, 230))
+    surface.blit(shadow, shadow.get_rect(center=(WIDTH // 2 + 2, BAR_Y - 15 + 2)))
+    surface.blit(label,  label.get_rect(center=(WIDTH // 2,      BAR_Y - 15)))
+
+
+# ================= FINAL BOSS (DURYUDANA): FIGHT LOOP =================
+def duryudana_fight_loop(round_num):
+    """
+    Sama persis alurnya dengan dursasana_fight_loop, cuma pakai class
+    Duryudana, intro screen 'FINAL BOSS FIGHT', dan health bar bernama
+    'Duryudana'. Dipanggil sekali saja setelah fight phase Round 5
+    selesai — lihat pengecekan final_boss_triggered di game_loop().
+
+    Return value:
+      'victory'      — boss kalah, lanjut ke explore
+      'player_died'  — player mati, sudah handle death_screen + full_reset di sini
+      'menu'         — player minta kembali ke main menu
+    """
+    global state
+
+    # ── 1. Tampilkan intro screen ────────────────────────────────────
+    final_boss_intro_screen(round_num)
+
+    # ── 2. Setup boss & posisi player ───────────────────────────────
+    boss       = Duryudana(WIDTH // 2, HEIGHT // 2 - 30, screen=screen)
+    boss_group = pygame.sprite.Group(boss)
+
+    player.rect.center = (WIDTH // 2, HEIGHT - 140)
+    if hasattr(player, 'x'):
+        player.x = float(player.rect.centerx)
+    if hasattr(player, 'y'):
+        player.y = float(player.rect.centery)
+
+    boss_name_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
+    boss_hp_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
+
+    fight_over         = False
+    death_linger_timer = 0    # frame tunggu setelah boss mati
+
+    # ── 3. Fight loop ────────────────────────────────────────────────
+    while True:
+        clock.tick(FPS)
+
+        # Cek kematian player
+        if player.health <= 0:
+            result = death_screen()
+            if result == "quit":
+                pygame.quit(); sys.exit()
+            full_reset()
+            state = "select"
+            return "player_died"
+
+        # Events
+        should_pause = False
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if dialog_box.active:
+                dialog_box.handle_event(event)
+                continue
+            mobile_controls.handle_event(event)
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    should_pause = True
+
+        mobile_controls.update()
+
+        if mobile_controls.pause_just_pressed:
+            mobile_controls.pause_just_pressed = False
+            should_pause = True
+
+        if should_pause:
+            pm_result, _ = pause_menu()
+            while pm_result == "settings":
+                settings_menu()
+                pm_result, _ = pause_menu()
+            if pm_result == "menu":
+                state = "menu"
+                return "menu"
+            elif pm_result == "select":
+                chosen = character_select_from_pause()
+                if chosen is not None:
+                    restart_from_pause(chosen)
+                    return "player_died"
+
+        # Update player
+        players.update()
+        player.rect.clamp_ip(screen.get_rect())
+
+        # Panah (Archer)
+        if player.spawn_arrow:
+            arrow = Arrow(player.rect.centerx, player.rect.centery, player.facing)
+            arrows.add(arrow)
+            player.spawn_arrow = False
+        arrows.update()
+
+        if not fight_over:
+            boss_group.update(player)
+
+            # Player serang boss
+            if not isinstance(player, Archer):
+                attack_box = player.get_attack_hitbox()
+                if attack_box and boss.rect.colliderect(attack_box):
+                    boss.take_damage(player.facing, player.damage)
+
+            for arrow in list(arrows):
+                if arrow.rect.colliderect(boss.rect):
+                    boss.take_damage(player.facing, player.damage)
+                    arrow.kill()
+
+            # Boss serang player
+            atk = boss.get_attack_hitbox()
+            if atk and atk.colliderect(player.rect):
+                player.take_damage(1)
+
+            # Boss baru saja mati?
+            if boss.just_died:
+                boss.just_died     = False
+                fight_over         = True
+                death_linger_timer = 160   # ±2.7 detik tunggu animasi die selesai
+
+        else:
+            # Terus update biar animasi mati jalan
+            boss_group.update(player)
+            death_linger_timer -= 1
+            if boss.death_done and death_linger_timer <= 0:
+                return "victory"
+
+        # ── Draw ──────────────────────────────────────────────────────
+        screen.blit(bg_arena, (0, 0))
+
+        boss_group.draw(screen)
+        player.draw(screen)
+        arrows.draw(screen)
+
+        # Health bar besar di atas hanya saat boss belum benar-benar mati
+        if not boss.death_done:
+            _draw_duryudana_healthbar(screen, boss, boss_name_font, boss_hp_font)
+
+        # HUD player
+        healing_aura.update_origin(player.rect.centerx, player.rect.top)
+        healing_aura.update()
+        healing_aura.draw(screen)
+
+        player_hud.draw(screen, player.health, player.max_health,
+                        stamina_ratio_from_dash(player), water_count)
+
+        if hasattr(player, "draw_ultimate_banner"):
+            player.draw_ultimate_banner(screen)
+        if hasattr(player, "draw_rage_banner"):
+            player.draw_rage_banner(screen)
+
+        mobile_controls.draw(screen, show_pause=True)
+        pygame.display.flip()
+
+
 # ================= DEATH SCREEN =================
 def death_screen():
     death_title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 100)
@@ -2003,7 +2496,7 @@ def game_loop():
     global relic_notif_timer
     global water_count
     global relic, portal
-    global current_round, miniboss_round, miniboss_triggered
+    global current_round, miniboss_round, miniboss_triggered, boss_triggered, final_boss_triggered
 
     # Track action dari node dialog terakhir yang punya "action" field
     last_dialog_action = None
@@ -2065,6 +2558,36 @@ def game_loop():
                             state = "menu"
                             return
                         # mb_result == "victory" → lanjut ke explore
+
+                    # ── Boss utama (Dursasana) — fixed di Round 4, sekali saja ──
+                    if current_round == BOSS_ROUND and not boss_triggered:
+                        boss_triggered = True
+                        print(f"[BOSS] ⚔  BOSS FIGHT! Dursasana muncul di Round {current_round}  ⚔")
+                        boss_result = dursasana_fight_loop(current_round)
+                        if boss_result == "player_died":
+                            # full_reset + state="select" sudah dilakukan di dalam
+                            return
+                        elif boss_result == "menu":
+                            state = "menu"
+                            return
+                        # boss_result == "victory" → lanjut ke explore, dan
+                        # karena boss_triggered sudah True, dia tidak akan
+                        # muncul lagi di round-round berikutnya.
+
+                    # ── Final boss (Duryudana) — fixed di Round 5, sekali saja ──
+                    if current_round == FINAL_BOSS_ROUND and not final_boss_triggered:
+                        final_boss_triggered = True
+                        print(f"[FINAL BOSS] ⚔  FINAL BOSS FIGHT! Duryudana muncul di Round {current_round}  ⚔")
+                        final_boss_result = duryudana_fight_loop(current_round)
+                        if final_boss_result == "player_died":
+                            # full_reset + state="select" sudah dilakukan di dalam
+                            return
+                        elif final_boss_result == "menu":
+                            state = "menu"
+                            return
+                        # final_boss_result == "victory" → lanjut ke explore, dan
+                        # karena final_boss_triggered sudah True, dia tidak akan
+                        # muncul lagi di round-round berikutnya.
 
                     start_explore()
 
@@ -2509,9 +3032,8 @@ def game_loop():
         # supaya muncul di atas semua elemen lain (HUD, mobile controls, dll).
         if hasattr(player, "draw_ultimate_banner"):
             player.draw_ultimate_banner(screen)
-        if hasattr(player, "draw_rage_banner"):
+        if hasattr(player, 'draw_rage_banner'):
             player.draw_rage_banner(screen)
-
         pygame.display.flip()
 
 # ================= RUN =================

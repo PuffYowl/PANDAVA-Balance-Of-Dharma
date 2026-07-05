@@ -23,7 +23,7 @@ class Sadewa(BasePlayer):
         )
 
         # ================= STATS =================
-        self.speed = 1.5
+        self.speed = 2.3
         self.dash_speed = 18
         self.attack_cooldown = 35
 
@@ -131,9 +131,9 @@ class Sadewa(BasePlayer):
 
         # END ATTACK
         if self.state == "attack" and self.frame_index >= len(frames):
+            self.state = "idle"
             self.attacking = False
             self.attack_timer = self.attack_cooldown
-            self.state = "idle"
             self.frame_index = 0
             frames = self.animations[self.state]  # refresh biar gak sempat nampilin frame attack yang lama
 

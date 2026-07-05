@@ -173,7 +173,7 @@ class BasePlayer(pygame.sprite.Sprite):
                 self.animations = {
                     
                     "idle": load_frames(f"{assets_folder}/Idle", 0.18),
-                    "walk": load_frames(f"{assets_folder}/Walk", 0.18),
+                    "walk": load_frames(f"{assets_folder}/Walk", 0.09),
                     "dash": load_frames(f"{assets_folder}/Dash", 0.18),
                     "attack": load_frames(f"{assets_folder}/Attack", 0.4),
                 }
@@ -206,6 +206,7 @@ class BasePlayer(pygame.sprite.Sprite):
         self.attacking = False
         self.attack_timer = 0
         self.attack_cooldown = 25
+        self._attack_key_prev = False
 
         # HEALTH
         self.max_health = 5
@@ -278,8 +279,11 @@ class BasePlayer(pygame.sprite.Sprite):
  
         # ATTACK
         attack_pressed = keys[pygame.K_p] or (mc and mc.attack)
- 
-        if attack_pressed and not self.attacking and self.attack_timer == 0:
+
+        attack_just_pressed = attack_pressed and not self._attack_key_prev
+        self._attack_key_prev = attack_pressed
+
+        if attack_just_pressed and not self.attacking and self.attack_timer == 0:
  
             self.attacking = True
             self.state = "attack"
