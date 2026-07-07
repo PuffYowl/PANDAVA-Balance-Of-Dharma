@@ -236,6 +236,17 @@ class MobileControls:
         self.attack     = False
         self.dash       = False
 
+        # ---- Attack button mode — "atk" (default, normal attack) or
+        # "enter" (button shows "ENTER" and acts like pressing E, used
+        # when the player is near an interactable portal zone). Toggle
+        # with set_attack_mode(). ----
+        self.attack_mode = "atk"
+        # One-shot flag: set True the frame the ATK button is pressed
+        # while attack_mode == "enter". Game code should read it once
+        # per frame then reset it to False (same pattern as
+        # pause_just_pressed).
+        self.interact_just_pressed = False
+
         self.joy_vec = (0.0, 0.0)
 
         # ---- Pre-rendered pixel art sprites (cached, rebuilt on state change) ----
@@ -251,6 +262,20 @@ class MobileControls:
             BUTTON_RADIUS, self.scale, "ATK", self.font, True,
             EMBER_MID, EMBER_LIGHT, EMBER_DARK
         )
+
+        # ---- "ENTER" variant of the attack button — swapped in whenever
+        # the player is standing near an interactable portal zone, so the
+        # single ATK button doubles as the E/interact key on mobile. See
+        # set_attack_mode(). ----
+        self._btn_enter_sprite_idle = _build_button(
+            BUTTON_RADIUS, self.scale, "ENTER", self.font, False,
+            GOLD_MID, GOLD_LIGHT, GOLD_DARK
+        )
+        self._btn_enter_sprite_pressed = _build_button(
+            BUTTON_RADIUS, self.scale, "ENTER", self.font, True,
+            GOLD_MID, GOLD_LIGHT, GOLD_DARK
+        )
+
         self._btn_dash_sprite_idle = _build_button(
             BUTTON_RADIUS, self.scale, "DASH", self.font, False,
             SKY_MID, SKY_LIGHT, SKY_DARK
@@ -334,7 +359,12 @@ class MobileControls:
         if self._dist(pos, self.btn_attack_center) <= BUTTON_RADIUS * 1.3 and self.btn_attack_touch_id is None:
             self.btn_attack_touch_id = touch_id
             self.btn_attack_pressed = True
-            self.attack = True
+            if self.attack_mode == "enter":
+                # Acts like a one-shot "E" press (open dialog / enter portal)
+                # instead of a normal attack.
+                self.interact_just_pressed = True
+            else:
+                self.attack = True
             return
 
         if self._dist(pos, self.btn_dash_center) <= BUTTON_RADIUS * 1.3 and self.btn_dash_touch_id is None:
@@ -466,8 +496,12 @@ class MobileControls:
         kx, ky = self.joy_knob_pos
         surface.blit(knob, (kx - knob.get_width() // 2, ky - knob.get_height() // 2))
 
-        # Attack button
-        atk = self._btn_attack_sprite_pressed if self.btn_attack_pressed else self._btn_attack_sprite_idle
+        # Attack button — shows "ENTER" instead of "ATK" while attack_mode
+        # is "enter" (player near an interactable portal zone).
+        if self.attack_mode == "enter":
+            atk = self._btn_enter_sprite_pressed if self.btn_attack_pressed else self._btn_enter_sprite_idle
+        else:
+            atk = self._btn_attack_sprite_pressed if self.btn_attack_pressed else self._btn_attack_sprite_idle
         ax, ay = self.btn_attack_center
         surface.blit(atk, (ax - atk.get_width() // 2, ay - atk.get_height() // 2))
 
@@ -511,6 +545,7 @@ class MobileControls:
         self.btn_attack_touch_id = None
         self.btn_attack_pressed = False
         self.attack = False
+        self.interact_just_pressed = False
         self.btn_dash_touch_id = None
         self.btn_dash_pressed = False
         self.dash = False
@@ -520,6 +555,21 @@ class MobileControls:
         self.edit_mode = False
         self._edit_drag_target = None
         self._edit_drag_touch_id = None
+
+    # ---------------------------------------------------------------
+    # ATTACK BUTTON MODE — switch the ATK button into an ENTER button
+    # (label + behavior) when the player is near an interactable portal
+    # zone, and back to a normal attack button otherwise. Call this once
+    # per frame from game code, e.g.:
+    #
+    #     mobile_controls.set_attack_mode("enter" if show_interact and portal_open else "atk")
+    # ---------------------------------------------------------------
+    def set_attack_mode(self, mode):
+        """mode: "atk" (default — button attacks) or "enter" (button shows
+        "ENTER" and sets interact_just_pressed instead of attack)."""
+        if mode not in ("atk", "enter"):
+            mode = "atk"
+        self.attack_mode = mode
 
     def _handle_edit_event(self, event):
         if event.type == pygame.FINGERDOWN:

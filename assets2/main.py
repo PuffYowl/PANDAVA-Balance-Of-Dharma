@@ -2769,6 +2769,14 @@ def game_loop():
 
         mobile_controls.update()
 
+        # Tombol ATK (saat berubah jadi tombol "ENTER" — lihat bagian
+        # "Tombol ATK -> ENTER" di bagian DRAW) berfungsi sama seperti
+        # menekan tombol E di keyboard: dipakai untuk masuk portal / buka
+        # dialog NPC.
+        if mobile_controls.interact_just_pressed:
+            mobile_controls.interact_just_pressed = False
+            pressed_e = True
+
         if dialog_box.active:
             # Saat dialog Resi aktif, gunakan bg_resi sebagai latar
             # (bukan abu-abu polos) supaya suasana lebih atmosferik.
@@ -3065,12 +3073,14 @@ def game_loop():
 
         arrows.draw(screen)
 
-        # Portal map-transition prompt (gerbang pindah map, BUKAN Portal Resi)
-        if show_interact:
-            if portal_open:
-                msg = pixel_font.render("Press E", True, WHITE)
-            else:
-                msg = pixel_font.render("Portal locked!", True, RED)
+        # Portal map-transition prompt (gerbang pindah map, BUKAN Portal Resi).
+        # Teks "Press E" sudah dihapus — saat portal terbuka, tombol ATK di
+        # mobile controls otomatis berubah jadi tombol "ENTER" (lihat bagian
+        # "Tombol ATK -> ENTER" di bawah), jadi prompt teks tidak diperlukan
+        # lagi. Pesan "Portal locked!" tetap ditampilkan supaya player tahu
+        # kenapa dia belum bisa masuk.
+        if show_interact and not portal_open:
+            msg = pixel_font.render("Portal locked!", True, RED)
             screen.blit(msg, (player.rect.centerx - msg.get_width() // 2,
                                player.rect.top - 44))
 
@@ -3149,6 +3159,16 @@ def game_loop():
                     player.activate_rage()
                 else:
                     player.activate_ultimate()
+
+        # ── Tombol ATK -> ENTER ──────────────────────────────────────
+        # Saat player berdiri di portal zone (gerbang pindah map) yang
+        # sedang terbuka, tombol ATK di mobile controls berubah jadi
+        # tombol "ENTER" dan menekannya berfungsi sama seperti menekan E
+        # di keyboard (lihat pembacaan interact_just_pressed di atas).
+        if show_interact and portal_open:
+            mobile_controls.set_attack_mode("enter")
+        else:
+            mobile_controls.set_attack_mode("atk")
 
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens
