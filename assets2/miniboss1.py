@@ -8,6 +8,11 @@ import random
 # konsisten satu jenis, bukan cuma di main.py.
 FONT_PATH = "assets2/font/A Friend In Deed.otf"
 
+# Suara roar yang diputar saat animasi "startfight" mencapai frame ke-35
+# (index 35, dihitung dari 0) sampai animasi intro-nya selesai.
+ROAR_SOUND_PATH = "assets2/miniboss_roar.wav"
+ROAR_TRIGGER_FRAME = 35
+
 
 def _load_font(size):
     """Load FONT_PATH dengan fallback ke font default kalau filenya
@@ -17,6 +22,16 @@ def _load_font(size):
     except (FileNotFoundError, OSError):
         print(f"[MINIBOSS] Font '{FONT_PATH}' tidak ditemukan — pakai font default sementara")
         return pygame.font.SysFont(None, size)
+
+
+def _load_roar_sound():
+    """Load ROAR_SOUND_PATH dengan fallback aman kalau file belum ada
+    atau mixer belum di-init (supaya tidak crash total)."""
+    try:
+        return pygame.mixer.Sound(ROAR_SOUND_PATH)
+    except (FileNotFoundError, OSError, pygame.error):
+        print(f"[MINIBOSS] Sound '{ROAR_SOUND_PATH}' tidak ditemukan — roar dinonaktifkan")
+        return None
 
 
 def _draw_loading_bar(screen, progress, label=""):
@@ -149,6 +164,12 @@ class Miniboss_1(pygame.sprite.Sprite):
 
         _draw_loading_bar(screen, 1.0, "Selesai!")
 
+        # ── Roar sound — diputar saat frame startfight mencapai
+        #    ROAR_TRIGGER_FRAME sampai animasi intro selesai ──────────────
+        self.roar_sound    = _load_roar_sound()
+        self._roar_channel = None
+        self._roar_played  = False
+
         self.state       = "startfight"
         self.frame_index = 0.0
         self.anim_speed  = 0.35   # dipercepat (sebelumnya 0.15) sesuai permintaan
@@ -278,6 +299,11 @@ class Miniboss_1(pygame.sprite.Sprite):
         self.just_died       = True   # main.py baca lalu reset
         self.death_timer     = 0      # safety net — lihat update()
 
+        # Kalau roar masih bunyi (mis. boss dibunuh mid-intro), hentikan
+        if getattr(self, "_roar_channel", None) is not None:
+            self._roar_channel.stop()
+            self._roar_channel = None
+
         # ── Untuk animasi mati prosedural (dipakai kalau tidak ada
         #    sprite "mini-boss-die" asli) ────────────────────────────
         self.death_anim_timer       = 0
@@ -301,12 +327,26 @@ class Miniboss_1(pygame.sprite.Sprite):
 
         self.frame_index += self.anim_speed
 
+        # ── Roar sound: begitu frame startfight menyentuh frame ke-35,
+        #    mainkan suara roar dan biarkan looping sampai animasi
+        #    startfight-nya benar-benar selesai (di-stop di bawah) ───────
+        if (self.state == "startfight" and not self._roar_played
+                and self.roar_sound is not None
+                and int(self.frame_index) >= ROAR_TRIGGER_FRAME):
+            self._roar_channel = self.roar_sound.play(loops=-1)
+            self._roar_played  = True
+
         if self.frame_index >= len(frames):
             if self.state == "startfight":
                 # Intro selesai → aktifkan AI
                 self.intro_done  = True
                 self.state       = "walk"
                 self.frame_index = 0
+
+                # Animasi startfight selesai → hentikan roar (kalau masih bunyi)
+                if self._roar_channel is not None:
+                    self._roar_channel.stop()
+                    self._roar_channel = None
             elif self.state == "attack":
                 self.attacking   = False
                 self.state       = "walk"

@@ -1,6 +1,7 @@
 import pygame
 import random
 import sys
+import os
 from player.mage import Mage
 from player.assasin import Assasin
 from player.satyr import Satyr
@@ -50,6 +51,24 @@ FPS = 60
 # ================= LOAD ASSETS =================
 bg_menu = pygame.image.load("assets2/main_menu2.jpeg").convert()
 bg_menu = pygame.transform.scale(bg_menu, (WIDTH, HEIGHT))
+
+# Musik BGM main menu — diputar loop selama di main menu, berhenti saat
+# player masuk ke fight phase (lihat main_menu() dan game_loop()).
+try:
+    pygame.mixer.music.load("assets2/bgm_main_menu.wav")
+    menu_music_loaded = True
+except (pygame.error, FileNotFoundError):
+    menu_music_loaded = False
+    print("[BGM] assets2/bgm_main_menu.wav tidak ditemukan — musik menu dinonaktifkan.")
+
+# Musik BGM fight phase (lobby) & explore phase — satu lagu yang sama
+# dipakai untuk kedua fase, diputar loop sejak game_loop() dimulai sampai
+# player keluar dari game_loop (mati/kembali ke menu/select).
+# NOTE: filenya baru di-load pas game_loop() mulai (bukan di sini), supaya
+# tidak menimpa track musik main menu yang sudah di-load di atas.
+lobby_music_loaded = os.path.exists("assets2/bgm_boss.wav")
+if not lobby_music_loaded:
+    print("[BGM] assets2/bgm_boss.wav tidak ditemukan — musik lobby/explore dinonaktifkan.")
 
 card_yudhistira = pygame.image.load("assets2/yudhistira_card.jpeg").convert_alpha()
 card_arjuna     = pygame.image.load("assets2/arjuna_card.png").convert_alpha()
@@ -519,6 +538,9 @@ def main_menu():
     play_rect     = pygame.Rect(cx - btn_w // 2, 240, btn_w, btn_h)
     tutorial_rect = pygame.Rect(cx - btn_w // 2, 318, btn_w, btn_h)
     index_rect    = pygame.Rect(cx - btn_w // 2, 396, btn_w, btn_h)
+
+    if menu_music_loaded and not pygame.mixer.music.get_busy():
+        pygame.mixer.music.play(-1)  # loop terus selama di main menu
 
     while state == "menu":
         clock.tick(FPS)
@@ -2575,6 +2597,14 @@ def game_loop():
     last_dialog_action = None
     prev_dialog_active = False
 
+    # Player masuk ke fight phase ("lobby") begitu game_loop() dimulai —
+    # hentikan musik main menu, lalu putar musik fight/explore.
+    if pygame.mixer.music.get_busy():
+        pygame.mixer.music.stop()
+    if lobby_music_loaded:
+        pygame.mixer.music.load("assets2/bgm_boss.wav")
+        pygame.mixer.music.play(-1)  # loop terus untuk fight phase & explore phase
+
     while state == "game":
         clock.tick(FPS)
 
@@ -2585,6 +2615,7 @@ def game_loop():
                 pygame.quit(); sys.exit()
             else:  # "restart" → reset semua lalu ke character select
                 full_reset()
+                pygame.mixer.music.stop()
                 state = "select"
                 return
 
@@ -2626,8 +2657,10 @@ def game_loop():
                         mb_result = miniboss_fight_loop(current_round)
                         if mb_result == "player_died":
                             # full_reset + state="select" sudah dilakukan di dalam
+                            pygame.mixer.music.stop()
                             return
                         elif mb_result == "menu":
+                            pygame.mixer.music.stop()
                             state = "menu"
                             return
                         # mb_result == "victory" → lanjut ke explore
@@ -2639,8 +2672,10 @@ def game_loop():
                         boss_result = dursasana_fight_loop(current_round)
                         if boss_result == "player_died":
                             # full_reset + state="select" sudah dilakukan di dalam
+                            pygame.mixer.music.stop()
                             return
                         elif boss_result == "menu":
+                            pygame.mixer.music.stop()
                             state = "menu"
                             return
                         # boss_result == "victory" → lanjut ke explore, dan
@@ -2654,8 +2689,10 @@ def game_loop():
                         final_boss_result = duryudana_fight_loop(current_round)
                         if final_boss_result == "player_died":
                             # full_reset + state="select" sudah dilakukan di dalam
+                            pygame.mixer.music.stop()
                             return
                         elif final_boss_result == "menu":
+                            pygame.mixer.music.stop()
                             state = "menu"
                             return
                         # final_boss_result == "victory" → lanjut ke explore, dan
@@ -2758,6 +2795,7 @@ def game_loop():
                     restart_from_pause(chosen)
                 # chosen is None means player hit ESC — fall back into game_loop
             elif result == "menu":
+                pygame.mixer.music.stop()
                 state = "menu"
                 return  # exits game_loop; outer while True picks up state == "menu"
             # result == "resume": do nothing, game_loop continues normally
