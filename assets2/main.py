@@ -62,6 +62,15 @@ card_nakula     = pygame.transform.scale(card_nakula, (300, 400))
 card_sadewa     = pygame.image.load("assets2/card_sadewa.png").convert_alpha()
 card_sadewa     = pygame.transform.scale(card_sadewa, (300, 400))
 
+# Card index untuk karakter Kurawa (ditampilkan di Index — bukan
+# character select, karena mereka bukan karakter yang bisa dimainkan)
+card_kurawa_general = pygame.image.load("assets2/kurawa_general_card.png").convert_alpha()
+card_kurawa_general = pygame.transform.scale(card_kurawa_general, (300, 400))
+card_dursasana      = pygame.image.load("assets2/dursasana_card.png").convert_alpha()
+card_dursasana      = pygame.transform.scale(card_dursasana, (300, 400))
+card_duryudana      = pygame.image.load("assets2/duryudana_card.png").convert_alpha()
+card_duryudana      = pygame.transform.scale(card_duryudana, (300, 400))
+
 relic_arjuna    = pygame.image.load("assets2/relic1.png").convert_alpha()
 relic_arjuna    = pygame.transform.scale(relic_arjuna, (25, 25))
 relic_bima      = pygame.image.load("assets2/relic2.png").convert_alpha()
@@ -74,6 +83,37 @@ relic_nakula    = pygame.image.load("assets2/relic5.png").convert_alpha()
 relic_nakula    = pygame.transform.scale(relic_nakula, (25, 25))
 portal_resi     = pygame.image.load("assets2/portal_resi.png").convert_alpha()
 portal_resi     = pygame.transform.scale(portal_resi, (300, 300))
+
+# Tombol panah navigasi (Index Pandava & Select Character) — kalau
+# asetnya belum ada, fallback ke kotak warna + simbol "◄"/"►" seperti
+# sebelumnya (lihat _draw_nav_arrow_btn).
+try:
+    arrow_left_img  = pygame.image.load("assets2/left_button.png").convert_alpha()
+    arrow_right_img = pygame.image.load("assets2/right_button.png").convert_alpha()
+except (FileNotFoundError, pygame.error):
+    print("[UI] left_button.png / right_button.png tidak ditemukan — pakai tombol panah placeholder")
+    arrow_left_img  = None
+    arrow_right_img = None
+
+
+def _draw_nav_arrow_btn(surface, rect, image, hovered, font, fallback_symbol):
+    """Gambar tombol panah navigasi. Kalau `image` (Surface) tersedia,
+    dipakai sprite itu (di-scale ke ukuran rect, sedikit di-highlight
+    saat hover). Kalau tidak ada, fallback ke kotak warna + simbol teks
+    seperti versi lama."""
+    if image is not None:
+        img = pygame.transform.smoothscale(image, (rect.width, rect.height))
+        if hovered:
+            img = img.copy()
+            img.fill((40, 40, 40, 0), special_flags=pygame.BLEND_RGBA_ADD)
+        surface.blit(img, rect)
+    else:
+        color  = (200, 170, 40) if hovered else (80, 70, 40)
+        border = (255, 220, 80) if hovered else (120, 100, 50)
+        pygame.draw.rect(surface, border, rect.inflate(4, 4), border_radius=10)
+        pygame.draw.rect(surface, color,  rect,               border_radius=9)
+        arrow_surf = font.render(fallback_symbol, True, WHITE)
+        surface.blit(arrow_surf, arrow_surf.get_rect(center=rect.center))
 
 bg_map1 = pygame.image.load("assets2/background7.jpeg").convert()
 bg_map1 = pygame.transform.scale(bg_map1, (WIDTH, HEIGHT))
@@ -150,27 +190,6 @@ pixel_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
 btn_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 80)
 hud_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 24)
 small_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 20)
-
-# Font khusus emoji — Segoe UI Emoji built-in di Windows
-# Dipakai untuk render karakter emoji yang tidak ada di font pixel custom
-emoji_font_s  = pygame.font.SysFont("segoeuiemoji", 20)   # setara small_font
-emoji_font_m  = pygame.font.SysFont("segoeuiemoji", 24)   # setara hud_font
-emoji_font_l  = pygame.font.SysFont("segoeuiemoji", 36)   # setara pixel_font
-
-
-def render_with_emoji(font, emoji_font, text, color):
-    """
-    Render teks yang mengandung emoji dengan menggabungkan dua surface:
-    - Teks biasa dirender dengan font pixel custom
-    - Emoji dirender dengan Segoe UI Emoji lalu di-blit di atas
-    Cara mudah: render seluruhnya pakai emoji_font (warna teks tetap sama),
-    lalu overlay teks non-emoji pakai font asli kalau tidak ada emoji.
-    Kalau ada emoji, pakai emoji_font saja supaya konsisten.
-    """
-    has_emoji = any(ord(c) > 127 and ord(c) not in range(0x2000, 0x2800) for c in text)
-    if has_emoji:
-        return emoji_font.render(text, True, color)
-    return font.render(text, True, color)
 
 arrows = pygame.sprite.Group()
 
@@ -734,6 +753,68 @@ _PANDAVA_LORE = [
             "menjadikannya pendekar yang sangat berbahaya.",
         ],
     },
+
+    # ================= KUBU KURAWA (ANTAGONIS) =================
+    {
+        "name":  "Jenderal Kurawa",
+        "title": "Algojo Berdarah Panas Pasukan Kurawa",
+        "card":  None,   # diisi dari card_kurawa_general
+        "color": (220, 60, 40),   # merah membara
+        "lore":  [
+            "Jenderal Kurawa bukan salah satu dari seratus putra",
+            "Dretarastra, melainkan panglima yang memimpin barisan",
+            "depan pasukan Hastinapura di bawah panji Kurawa.",
+            "",
+            "Tubuhnya raksasa, wajahnya menyerupai iblis merah —",
+            "perlambang amarah dan nafsu perang yang membakar",
+            "seluruh pasukan yang dipimpinnya.",
+            "",
+            "Godam besar di tangannya sanggup meremukkan baja.",
+            "Ia selalu maju paling depan di setiap pertempuran,",
+            "menjadi rintangan pertama sebelum pemain bertemu",
+            "para pangeran Kurawa yang sesungguhnya.",
+        ],
+    },
+    {
+        "name":  "Dursasana",
+        "title": "Tangan Kanan Berdarah Duryudana",
+        "card":  None,   # diisi dari card_dursasana
+        "color": (200, 30, 30),   # merah darah
+        "lore":  [
+            "Dursasana adalah putra kedua Dretarastra, adik",
+            "kandung Duryudana, dan tangan kanannya yang paling",
+            "setia sekaligus paling ditakuti di seluruh Hastinapura.",
+            "",
+            "Namanya dikenang sebagai simbol kekejaman Kurawa:",
+            "ia yang menyeret dan mencoba mempermalukan Drupadi",
+            "di depan seluruh istana — penghinaan yang memicu",
+            "sumpah balas dendam Pandava.",
+            "",
+            "Bima bersumpah akan merobek dadanya dan meminum",
+            "darahnya sendiri — sumpah yang benar-benar ia",
+            "tunaikan di medan Kurukshetra.",
+        ],
+    },
+    {
+        "name":  "Duryudana",
+        "title": "Raja Hastinapura, Sulung Seratus Kurawa",
+        "card":  None,   # diisi dari card_duryudana
+        "color": (230, 180, 60),   # emas kekuasaan
+        "lore":  [
+            "Duryudana adalah putra sulung Dretarastra dan Gandari,",
+            "pewaris takhta Hastinapura sekaligus pemimpin seratus",
+            "saudara Kurawa dalam Perang Bharatayuddha.",
+            "",
+            "Ambisi dan kebenciannya kepada Pandava tumbuh sejak",
+            "kecil — memuncak lewat permainan dadu curang yang",
+            "merampas kerajaan dan kehormatan Pandava sekaligus.",
+            "",
+            "Seluruh tubuhnya kebal senjata berkat berkah suci,",
+            "kecuali pahanya. Di titik itulah gada Bima akhirnya",
+            "menumbangkan sang raja Kurawa, menutup perang paling",
+            "berdarah dalam kisah Mahabharata.",
+        ],
+    },
 ]
 
 
@@ -745,6 +826,9 @@ def index_screen():
     _PANDAVA_LORE[2]["card"] = card_yudhistira
     _PANDAVA_LORE[3]["card"] = card_nakula   # belum ada card Nakula khusus
     _PANDAVA_LORE[4]["card"] = card_sadewa   # belum ada card Sadewa khusus
+    _PANDAVA_LORE[5]["card"] = card_kurawa_general
+    _PANDAVA_LORE[6]["card"] = card_dursasana
+    _PANDAVA_LORE[7]["card"] = card_duryudana
 
     title_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 36)
     name_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 30)
@@ -752,27 +836,21 @@ def index_screen():
     hint_font  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 16)
 
     selected = 0
-    arrow_btn_size = 54
     cx, cy   = WIDTH // 2, HEIGHT // 2
-
-    left_rect  = pygame.Rect(cx - 300 - arrow_btn_size // 2,
-                             cy - arrow_btn_size // 2,
-                             arrow_btn_size, arrow_btn_size)
-    right_rect = pygame.Rect(cx + 300 - arrow_btn_size // 2,
-                             cy - arrow_btn_size // 2,
-                             arrow_btn_size, arrow_btn_size)
 
     back_w, back_h = 180, 50
     back_rect = pygame.Rect(cx - back_w // 2, HEIGHT - back_h - 14,
                             back_w, back_h)
 
-    def draw_arrow_btn(rect, symbol, hovered):
-        color  = (200, 170, 40) if hovered else (60, 50, 30)
-        border = (255, 220, 80) if hovered else (100, 80, 40)
-        pygame.draw.rect(screen, border, rect.inflate(4, 4), border_radius=10)
-        pygame.draw.rect(screen, color,  rect,               border_radius=9)
-        a_surf = title_font.render(symbol, True, WHITE)
-        screen.blit(a_surf, a_surf.get_rect(center=rect.center))
+    # ── Arrow buttons — sekarang di samping kiri/kanan tombol Kembali ──
+    arrow_btn_size = 54
+    arrow_gap      = 16
+    left_rect  = pygame.Rect(back_rect.left  - arrow_gap - arrow_btn_size,
+                             back_rect.centery - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+    right_rect = pygame.Rect(back_rect.right + arrow_gap,
+                             back_rect.centery - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
 
     running = True
     while running:
@@ -818,7 +896,7 @@ def index_screen():
         screen.blit(tint, (0, 0))
 
         # ── Judul ──────────────────────────────────────────────────
-        t_surf = title_font.render("✦  INDEX PANDAVA  ✦", True, GOLD)
+        t_surf = title_font.render("✦  INDEX KARAKTER  ✦", True, GOLD)
         screen.blit(t_surf, (cx - t_surf.get_width() // 2, 10))
 
         # ── Card karakter (kiri) ────────────────────────────────────
@@ -857,8 +935,8 @@ def index_screen():
                 pygame.draw.circle(screen, WHITE, (dot_x, dot_y), 7, 2)
 
         # ── Panah navigasi ─────────────────────────────────────────
-        draw_arrow_btn(left_rect,  "◄", left_rect.collidepoint(mouse_pos))
-        draw_arrow_btn(right_rect, "►", right_rect.collidepoint(mouse_pos))
+        _draw_nav_arrow_btn(screen, left_rect,  arrow_left_img,  left_rect.collidepoint(mouse_pos),  title_font, "◄")
+        _draw_nav_arrow_btn(screen, right_rect, arrow_right_img, right_rect.collidepoint(mouse_pos), title_font, "►")
 
         # ── Tombol kembali ─────────────────────────────────────────
         _draw_menu_btn(screen, sub_font, "◄  Kembali", back_rect,
@@ -879,7 +957,7 @@ _MAP_AREAS = {
         "desc":  ["Area awal — temukan musuh di sini.",
                   "Fase Bertarung: kalahkan semua musuh",
                   "hingga timer habis untuk buka portal."],
-        "icon":  "⚔",
+        "icon":  "X",
     },
     2: {
         "name":  "Dataran Tengah",
@@ -887,7 +965,7 @@ _MAP_AREAS = {
         "desc":  ["Hub utama penghubung semua area.",
                   "Portal ke Map 3, 4, dan 5 tersedia di sini.",
                   "Jelajahi tiap sudut untuk masuk area lain."],
-        "icon":  "✦",
+        "icon":  "+",
     },
     3: {
         "name":  "Hutan Sakral",
@@ -895,7 +973,7 @@ _MAP_AREAS = {
         "desc":  ["Area alam mistis penuh relic tersembunyi.",
                   "Portal Resi Abimayasa bisa muncul di sini.",
                   "Bisa kembali ke Dataran Tengah via portal."],
-        "icon":  "🌿",
+        "icon":  "~",
     },
     4: {
         "name":  "Kuil Kuno",
@@ -903,7 +981,7 @@ _MAP_AREAS = {
         "desc":  ["Reruntuhan candi penuh misteri dan relic.",
                   "Portal Resi dan Batu Prasasti ada di sini.",
                   "Bisa kembali ke Dataran Tengah via portal."],
-        "icon":  "🏛",
+        "icon":  "^",
     },
     5: {
         "name":  "Puncak Kahyangan",
@@ -911,7 +989,7 @@ _MAP_AREAS = {
         "desc":  ["Area tertinggi — langit dan awan.",
                   "Relic langka dan Portal Resi ada di sini.",
                   "Bisa kembali ke Dataran Tengah via portal."],
-        "icon":  "☁",
+        "icon":  "*",
     },
 }
 
@@ -1004,8 +1082,8 @@ def show_map_overlay(current_map: int):
             if is_current:
                 pygame.draw.circle(screen, col, pos, NODE_R)
 
-            # Icon area — pakai emoji_font supaya emoji terlihat
-            icon_surf = emoji_font_m.render(area["icon"], True,
+            # Icon area — pakai font pixel biasa (bukan emoji font lagi)
+            icon_surf = hud_font.render(area["icon"], True,
                                          BLACK if is_current else col)
             screen.blit(icon_surf, icon_surf.get_rect(center=pos))
 
@@ -1077,25 +1155,7 @@ def _draw_character_select_ui(surface, options, selected, title_font, hint_font)
     title_surf = title_font.render("SELECT CHARACTER", True, GOLD)
     surface.blit(title_surf, (WIDTH // 2 - title_surf.get_width() // 2, 10))
 
-    # ── Arrow LEFT button ────────────────────────────────────────
-    arrow_btn_size = 54
-    left_rect  = pygame.Rect(cx - 280 - arrow_btn_size // 2, cy - arrow_btn_size // 2,
-                             arrow_btn_size, arrow_btn_size)
-    right_rect = pygame.Rect(cx + 280 - arrow_btn_size // 2, cy - arrow_btn_size // 2,
-                             arrow_btn_size, arrow_btn_size)
-
     mouse_pos = pygame.mouse.get_pos()
-
-    def draw_arrow_btn(rect, symbol, hovered):
-        color  = (200, 170, 40) if hovered else (80, 70, 40)
-        border = (255, 220, 80) if hovered else (120, 100, 50)
-        pygame.draw.rect(surface, border, rect.inflate(4, 4), border_radius=10)
-        pygame.draw.rect(surface, color,  rect,               border_radius=9)
-        arrow_surf = title_font.render(symbol, True, WHITE)
-        surface.blit(arrow_surf, arrow_surf.get_rect(center=rect.center))
-
-    draw_arrow_btn(left_rect,  "◄", left_rect.collidepoint(mouse_pos))
-    draw_arrow_btn(right_rect, "►", right_rect.collidepoint(mouse_pos))
 
     # ── Checkmark CONFIRM button ──────────────────────────────────
     check_w, check_h = 180, 56
@@ -1107,6 +1167,19 @@ def _draw_character_select_ui(surface, options, selected, title_font, hint_font)
     pygame.draw.rect(surface, check_color,  check_rect,               border_radius=11)
     check_surf = title_font.render("✓  Pilih", True, WHITE)
     surface.blit(check_surf, check_surf.get_rect(center=check_rect.center))
+
+    # ── Arrow buttons — sekarang di samping kiri/kanan tombol Pilih ──
+    arrow_btn_size = 54
+    arrow_gap      = 16
+    left_rect  = pygame.Rect(check_rect.left  - arrow_gap - arrow_btn_size,
+                             check_rect.centery - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+    right_rect = pygame.Rect(check_rect.right + arrow_gap,
+                             check_rect.centery - arrow_btn_size // 2,
+                             arrow_btn_size, arrow_btn_size)
+
+    _draw_nav_arrow_btn(surface, left_rect,  arrow_left_img,  left_rect.collidepoint(mouse_pos),  title_font, "◄")
+    _draw_nav_arrow_btn(surface, right_rect, arrow_right_img, right_rect.collidepoint(mouse_pos), title_font, "►")
 
     # ── Keyboard hint ─────────────────────────────────────────────
     hint_surf = hint_font.render("◄ / ► untuk memilih   |   Enter / ✓ untuk konfirmasi", True, (160, 160, 160))
@@ -2975,7 +3048,7 @@ def game_loop():
         if phase == "explore":
             map_btn_rect = pygame.Rect(WIDTH - 110, HEIGHT - 48, 100, 36)
             map_mouse_hov = map_btn_rect.collidepoint(pygame.mouse.get_pos())
-            _draw_menu_btn(screen, emoji_font_s, "🗺  MAP", map_btn_rect, map_mouse_hov)
+            _draw_menu_btn(screen, small_font, "[ MAP ]", map_btn_rect, map_mouse_hov)
 
             # Cek klik mouse pada tombol MAP
             for _ev in pygame.event.get(pygame.MOUSEBUTTONDOWN):
@@ -2993,12 +3066,12 @@ def game_loop():
         # ── Tombol BOOST / ULTIMATE / RAGE (semua karakter) ─────────────
         # Tengah bawah layar — tetap kelihatan di kedua fase (lobby & explore).
         # Tombol yang SAMA berubah fungsi tergantung state:
-        #   1. "🔥 AKTIF!"  — ultimate biasa sedang berjalan
-        #   2. "⏳ Xs"      — masih cooldown
-        #   3. "💢 RAGE!"   — window RAGE terbuka (5 detik setelah cooldown
+        #   1. "[ AKTIF! ]"  — ultimate biasa sedang berjalan
+        #   2. "[ Xs ]"      — masih cooldown
+        #   3. "[ RAGE! ]"   — window RAGE terbuka (5 detik setelah cooldown
         #                     ultimate biasa habis) — kalau dipencet di sini,
         #                     boost LEBIH BESAR tapi honor turun (adharma naik)
-        #   4. "⚡ ULT"     — siap pakai (ultimate biasa)
+        #   4. "[ ULT ]"     — siap pakai (ultimate biasa)
         if hasattr(player, "activate_ultimate"):
             boost_hover = boost_btn_rect.collidepoint(pygame.mouse.get_pos())
 
@@ -3006,16 +3079,16 @@ def game_loop():
             in_rage_active = getattr(player, "rage_active", False)
 
             if player.ultimate_active or in_rage_active:
-                boost_label = "🔥 AKTIF!"
+                boost_label = "[ AKTIF! ]"
             elif in_rage_window:
-                boost_label = "💢 RAGE!"
+                boost_label = "[ RAGE! ]"
             elif player.ultimate_cooldown_timer > 0:
                 cd_left     = player.ultimate_cooldown_timer // FPS + 1
-                boost_label = f"⏳ {cd_left}s"
+                boost_label = f"[ {cd_left}s ]"
             else:
-                boost_label = "⚡ ULT"
+                boost_label = "[ ULT ]"
 
-            _draw_menu_btn(screen, emoji_font_s, boost_label, boost_btn_rect, boost_hover)
+            _draw_menu_btn(screen, small_font, boost_label, boost_btn_rect, boost_hover)
 
             if boost_pressed:
                 if in_rage_window and hasattr(player, "activate_rage"):
