@@ -586,7 +586,6 @@ def tutorial_screen():
     tf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 38)
     sf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
     hf  = pygame.font.Font("assets2/font/A Friend In Deed.otf", 18)
-# hehehe boiii sigma ohio grimace shake sigma yo el teach
     lines = [
         ("PANDAVA — BALANCE OF DHARMA", True),
         ("", False),
