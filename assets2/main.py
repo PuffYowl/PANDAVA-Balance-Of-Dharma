@@ -1734,8 +1734,13 @@ def start_explore():
     # (explore phase) supaya player bisa menemukan & berbicara dengannya.
     # SETELAH perjanjian dibuat, mereka pindah total ke fight phase — jadi
     # di sini disembunyikan.
+    #
+    # Map tempat dia spawn dipilih RANDOM dari salah satu map explore
+    # (2/3/4/5) — bukan selalu map 2 — dan cuma tampil/bisa diinteraksi
+    # di map itu saja (lihat gate `covenant_npc.map_id == current_bg`
+    # di draw loop & blok interaksi).
     if not ritual_system.covenant_made:
-        covenant_npc.place_random(map_id=2)
+        covenant_npc.place_random(map_id=random.choice([2, 3, 4, 5]))
     else:
         covenant_npc.hide()
         ritual_system.stop()
@@ -2895,7 +2900,13 @@ def game_loop():
         # NPC pindah ke fight phase. ritual_system.update() (yang men-spawn
         # punishment enemy) hanya relevan SETELAH perjanjian dibuat & timer
         # berjalan, jadi itu tetap dibatasi ke fight phase saja.
-        if covenant_npc.visible:
+        #
+        # PENTING: tambahan `covenant_npc.map_id == current_bg` di sini.
+        # Tanpa ini, NPC tetap bisa diinteraksi dari map manapun selama
+        # `visible` True — padahal dia cuma "ditempatkan" secara fisik di
+        # SATU map (map_id). Sebelumnya ini menyebabkan Cindaku seolah ikut
+        # muncul/exist di semua map explore sekaligus.
+        if covenant_npc.visible and covenant_npc.map_id == current_bg:
             if phase == "lobby" and ritual_system.covenant_made:
                 # Update ritual timer → mungkin spawn Enemy2 punishment
                 new_punish = ritual_system.update(player, enemies, water_count)
@@ -3022,15 +3033,20 @@ def game_loop():
         # Covenant NPC (pohon + harimau) — muncul di phase manapun dia
         # sedang ditempatkan (explore sebelum perjanjian, fight sesudahnya).
         # CovenantNPC.draw()/draw_prompt() sudah punya guard internal
-        # `if not self.visible: return`, jadi aman dipanggil tanpa gate phase.
-        covenant_npc.draw(screen)
-        near_tree_for_ritual = (ritual_system.covenant_made and
-                                covenant_npc.near_tree(player))
-        covenant_npc.draw_prompt(
-            screen, player, small_font, GOLD, WHITE,
-            covenant_made=ritual_system.covenant_made,
-            near_tree=near_tree_for_ritual,
-        )
+        # `if not self.visible: return`, TAPI itu tidak cukup — visible
+        # tidak tahu-menahu soal map mana yang sedang aktif. Makanya perlu
+        # gate tambahan `covenant_npc.map_id == current_bg` di sini, supaya
+        # Cindaku hanya digambar & bisa berinteraksi di SATU map yang sama
+        # dengan tempat dia di-spawn, bukan ikut nongol di semua map explore.
+        if covenant_npc.map_id == current_bg:
+            covenant_npc.draw(screen)
+            near_tree_for_ritual = (ritual_system.covenant_made and
+                                    covenant_npc.near_tree(player))
+            covenant_npc.draw_prompt(
+                screen, player, small_font, GOLD, WHITE,
+                covenant_made=ritual_system.covenant_made,
+                near_tree=near_tree_for_ritual,
+            )
 
         # ← RELIC & PORTAL RESI DIGAMBAR DI SINI
         draw_relic()
