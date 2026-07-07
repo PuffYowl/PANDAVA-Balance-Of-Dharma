@@ -209,11 +209,11 @@ class CovenantNPC:
 
         if covenant_made and near_tree:
             # Prompt ritual
-            label = font.render("Press E — Ritual Air Suci", True, TEAL)
+            label = font.render("Ritual Air Suci", True, TEAL)
         elif not covenant_made:
-            label = font.render("Press E — Perjanjian Harimau", True, gold_color)
+            label = font.render("Perjanjian Harimau", True, gold_color)
         else:
-            label = font.render("Press E — Ritual Air Suci", True, TEAL)
+            label = font.render("Ritual Air Suci", True, TEAL)
 
         screen.blit(label, (
             self.cx - label.get_width() // 2,
@@ -262,8 +262,8 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
     line_i  = 0
     selected = 0             # 0=accept, 1=reject
     choices  = [
-        "✦ Terima perjanjian  (+20 HP, +1 Damage)",
-        "✕ Tolak — aku tidak butuh bantuan roh",
+        "Terima perjanjian  (+20 HP, +1 Damage)",
+        "Tolak — aku tidak butuh bantuan roh",
     ]
 
     def draw_frame(lines_done: list[tuple], choice_phase: bool, sel: int):
@@ -310,9 +310,6 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
                     ts = text_font.render(l, True, WHITE)
                     screen.blit(ts, (tx, box_y + 48 + i * 26))
 
-            hint = text_font.render("Tekan E / Enter untuk lanjut", True, (130, 120, 150))
-            screen.blit(hint, (box_x + box_w - hint.get_width() - 10,
-                               box_y + box_h - 24))
         else:
             # Pilihan
             q = name_font.render("Apa keputusanmu, pendekar?", True, GOLD)

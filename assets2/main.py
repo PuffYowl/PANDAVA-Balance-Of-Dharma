@@ -417,7 +417,7 @@ def draw_portal_prompt():
         return False
     pickup_range = pygame.Rect(portal["pos"][0] - 60, portal["pos"][1] - 60, 120, 120)
     if player.rect.colliderect(pickup_range):
-        label = small_font.render(f"Press E — {portal['name']}", True, GOLD)
+        label = small_font.render(f"{portal['name']}", True, GOLD)
         screen.blit(label, (
             portal["pos"][0] - label.get_width() // 2,
             portal["pos"][1] - 70
@@ -1204,8 +1204,6 @@ def _draw_character_select_ui(surface, options, selected, title_font, hint_font)
     _draw_nav_arrow_btn(surface, right_rect, arrow_right_img, right_rect.collidepoint(mouse_pos), title_font, "►")
 
     # ── Keyboard hint ─────────────────────────────────────────────
-    hint_surf = hint_font.render("◄ / ► untuk memilih   |   Enter / ✓ untuk konfirmasi", True, (160, 160, 160))
-    surface.blit(hint_surf, (WIDTH // 2 - hint_surf.get_width() // 2, HEIGHT - 22))
 
     return left_rect, right_rect, check_rect
 
