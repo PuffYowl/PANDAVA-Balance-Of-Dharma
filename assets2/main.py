@@ -225,7 +225,7 @@ PURPLE = (180, 80,  255)
 GRAY   = (60,  60,  60)   # background polos saat dialog box aktif
 
 # ================= TIMER DURATIONS (seconds) =================
-LOBBY_DURATION   = 60
+LOBBY_DURATION   = 5
 EXPLORE_DURATION = 60
 
 PORTRAIT_PATHS = {
@@ -394,7 +394,7 @@ def draw_relic_prompt():
         return False
     pickup_range = pygame.Rect(relic["pos"][0] - 60, relic["pos"][1] - 60, 120, 120)
     if player.rect.colliderect(pickup_range):
-        label = small_font.render(f"Press E — {relic['name']}", True, GOLD)
+        label = small_font.render(f"{relic['name']}", True, GOLD)
         screen.blit(label, (
             relic["pos"][0] - label.get_width() // 2,
             relic["pos"][1] - 70
@@ -2914,12 +2914,23 @@ def game_loop():
         # `visible` True — padahal dia cuma "ditempatkan" secara fisik di
         # SATU map (map_id). Sebelumnya ini menyebabkan Cindaku seolah ikut
         # muncul/exist di semua map explore sekaligus.
+        near_covenant_npc = False
+        near_portal = False
+        near_relic  = False
+
         if covenant_npc.visible and covenant_npc.map_id == current_bg:
+            # Update ritual timer (jalan terus, tidak tergantung jarak player)
             if phase == "lobby" and ritual_system.covenant_made:
-                # Update ritual timer → mungkin spawn Enemy2 punishment
                 new_punish = ritual_system.update(player, enemies, water_count)
                 for pe in new_punish:
                     enemies.add(pe)
+
+            # Cek jarak player ke NPC (untuk mengubah tombol)
+            if covenant_npc.near_player(player):
+                near_covenant_npc = True
+
+        # Interaksi (tekan E) – tetap pakai near_player
+        if covenant_npc.near_player(player) and pressed_e and not show_interact:
 
             # Cek interaksi player dengan NPC (show_interact sudah ada di atas)
             if covenant_npc.near_player(player) and pressed_e and not show_interact:
@@ -2973,6 +2984,7 @@ def game_loop():
             if player.rect.colliderect(pickup_range):
                 near_relic = True
                 if pressed_e and not show_interact:
+                    # ambil relic
                     relic["collected"] = True
                     relic_notif_timer  = 180
                     # Catat kepemilikan relic ke dialog_box supaya Resi bisa
@@ -3165,10 +3177,24 @@ def game_loop():
         # sedang terbuka, tombol ATK di mobile controls berubah jadi
         # tombol "ENTER" dan menekannya berfungsi sama seperti menekan E
         # di keyboard (lihat pembacaan interact_just_pressed di atas).
+        # Determine button mode
+        # Determine button mode
         if show_interact and portal_open:
             mobile_controls.set_attack_mode("enter")
+        elif near_relic:
+            mobile_controls.set_attack_mode("use")
+        elif near_portal:
+            mobile_controls.set_attack_mode("enter")
+        elif ritual_system.covenant_made and covenant_npc.near_tree(player):
+            # Hanya ubah ke USE jika player dekat dengan pohon ritual
+            mobile_controls.set_attack_mode("use")
+        elif near_covenant_npc:
+            # USE untuk dialog perjanjian (dekat dengan harimau)
+            mobile_controls.set_attack_mode("use")
         else:
             mobile_controls.set_attack_mode("atk")
+
+        
 
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens

@@ -276,6 +276,15 @@ class MobileControls:
             GOLD_MID, GOLD_LIGHT, GOLD_DARK
         )
 
+        self._btn_use_sprite_idle = _build_button(
+            BUTTON_RADIUS, self.scale, "USE", self.font, False,
+            GOLD_MID, GOLD_LIGHT, GOLD_DARK
+        )
+        self._btn_use_sprite_pressed = _build_button(
+            BUTTON_RADIUS, self.scale, "USE", self.font, True,
+            GOLD_MID, GOLD_LIGHT, GOLD_DARK
+        )
+
         self._btn_dash_sprite_idle = _build_button(
             BUTTON_RADIUS, self.scale, "DASH", self.font, False,
             SKY_MID, SKY_LIGHT, SKY_DARK
@@ -362,6 +371,8 @@ class MobileControls:
             if self.attack_mode == "enter":
                 # Acts like a one-shot "E" press (open dialog / enter portal)
                 # instead of a normal attack.
+                self.interact_just_pressed = True
+            elif self.attack_mode == "use":
                 self.interact_just_pressed = True
             else:
                 self.attack = True
@@ -500,6 +511,8 @@ class MobileControls:
         # is "enter" (player near an interactable portal zone).
         if self.attack_mode == "enter":
             atk = self._btn_enter_sprite_pressed if self.btn_attack_pressed else self._btn_enter_sprite_idle
+        elif self.attack_mode == "use":
+            atk = self._btn_use_sprite_pressed if self.btn_attack_pressed else self._btn_use_sprite_idle
         else:
             atk = self._btn_attack_sprite_pressed if self.btn_attack_pressed else self._btn_attack_sprite_idle
         ax, ay = self.btn_attack_center
@@ -567,7 +580,7 @@ class MobileControls:
     def set_attack_mode(self, mode):
         """mode: "atk" (default — button attacks) or "enter" (button shows
         "ENTER" and sets interact_just_pressed instead of attack)."""
-        if mode not in ("atk", "enter"):
+        if mode not in ("atk", "enter", "use"):
             mode = "atk"
         self.attack_mode = mode
 
