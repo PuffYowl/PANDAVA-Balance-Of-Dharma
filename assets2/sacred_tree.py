@@ -254,19 +254,47 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
     if tiger_img is None:
         tiger_img = _load("assets2/covenant_tiger.png", (160, 141))
 
+    # ── Tombol panah kanan (Next / Konfirmasi) ──────────────────────────
+    # Dicoba load dari assets2/ dulu, lalu root folder sebagai fallback.
+    _next_btn_candidates = [
+        "assets2/right_button.png",
+        "right_button.png",
+    ]
+    _next_btn_img_raw = None
+    for _p in _next_btn_candidates:
+        try:
+            _next_btn_img_raw = pygame.image.load(_p).convert_alpha()
+            break
+        except (pygame.error, FileNotFoundError):
+            pass
+
+    BTN_SIZE = 48   # ukuran render tombol (piksel × piksel)
+    if _next_btn_img_raw is not None:
+        next_btn_img = pygame.transform.smoothscale(_next_btn_img_raw, (BTN_SIZE, BTN_SIZE))
+    else:
+        # Fallback: segitiga putih kalau file tidak ditemukan
+        next_btn_img = pygame.Surface((BTN_SIZE, BTN_SIZE), pygame.SRCALPHA)
+        pygame.draw.polygon(next_btn_img, (220, 200, 80),
+                            [(8, 8), (8, BTN_SIZE - 8), (BTN_SIZE - 8, BTN_SIZE // 2)])
+
     choice_font = pygame.font.Font("assets2/font/A Friend In Deed.otf", 22)
     name_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 26)
     text_font   = pygame.font.Font("assets2/font/A Friend In Deed.otf", 20)
 
-    phase   = "narration"   # "narration" → "choice"
-    line_i  = 0
+    phase    = "narration"   # "narration" → "choice"
+    line_i   = 0
     selected = 0             # 0=accept, 1=reject
     choices  = [
         "Terima perjanjian  (+20 HP, +1 Damage)",
         "Tolak — aku tidak butuh bantuan roh",
     ]
 
+    # Rect tombol — diperbarui tiap draw_frame, dimulai dummy
+    next_btn_rect = pygame.Rect(0, 0, BTN_SIZE, BTN_SIZE)
+
     def draw_frame(lines_done: list[tuple], choice_phase: bool, sel: int):
+        nonlocal next_btn_rect
+
         screen.blit(frozen, (0, 0))
         dim = pygame.Surface((W, H), pygame.SRCALPHA)
         dim.fill((0, 0, 0, 160))
@@ -300,7 +328,7 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
                 line, lines_out = "", []
                 for w in words:
                     test = line + (" " if line else "") + w
-                    if text_font.size(test)[0] > box_w - tx - 50:
+                    if text_font.size(test)[0] > box_w - tx - BTN_SIZE - 24:
                         lines_out.append(line); line = w
                     else:
                         line = test
@@ -320,8 +348,22 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
                 cs = choice_font.render(prefix + ch, True, color)
                 screen.blit(cs, (tx, box_y + 60 + i * 36))
             hint = text_font.render("↑↓ pilih  |  E/Enter konfirmasi", True, (130, 120, 150))
-            screen.blit(hint, (box_x + box_w - hint.get_width() - 10,
+            screen.blit(hint, (box_x + box_w - hint.get_width() - BTN_SIZE - 18,
                                box_y + box_h - 24))
+
+        # ── Tombol Next / Konfirmasi (pojok kanan bawah dialog box) ──────
+        btn_x = box_x + box_w - BTN_SIZE - 12
+        btn_y = box_y + box_h - BTN_SIZE - 12
+        next_btn_rect = pygame.Rect(btn_x, btn_y, BTN_SIZE, BTN_SIZE)
+
+        # Efek hover ringan
+        mouse_pos = pygame.mouse.get_pos()
+        if next_btn_rect.collidepoint(mouse_pos):
+            hover_surf = pygame.Surface((BTN_SIZE, BTN_SIZE), pygame.SRCALPHA)
+            hover_surf.fill((255, 255, 255, 40))
+            screen.blit(hover_surf, (btn_x, btn_y))
+
+        screen.blit(next_btn_img, (btn_x, btn_y))
 
         pygame.display.flip()
 
@@ -347,17 +389,24 @@ def do_covenant_dialog(screen: pygame.Surface, clock, fps: int,
                 if event.key == pygame.K_ESCAPE:
                     running = False; break
 
+            # Klik mouse — cek apakah di tombol Next atau di area dialog lain
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                confirm = True
+                confirm = True   # klik di mana saja (termasuk tombol) = lanjut
 
+            # Touch
             if event.type == pygame.FINGERDOWN:
-                confirm = True
+                tx_f = int(event.x * W)
+                ty_f = int(event.y * H)
+                if next_btn_rect.collidepoint(tx_f, ty_f):
+                    confirm = True
+                else:
+                    confirm = True   # tap di mana saja juga lanjut
 
             if phase == "narration":
                 if confirm:
                     line_i += 1
                     if line_i >= len(_COVENANT_LINES):
-                        phase = "choice"
+                        phase  = "choice"
                         line_i = len(_COVENANT_LINES) - 1
             else:
                 selected = (selected + nav_dir) % len(choices)

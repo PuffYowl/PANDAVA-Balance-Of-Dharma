@@ -36,6 +36,20 @@ class Archer(BasePlayer):
 
         self.spawn_arrow = False
 
+        # ================= SOUND EFFECT ARROW =================
+        # Load sound effect panah — pakai pygame.mixer.Sound (bukan music)
+        # supaya tidak mengganggu BGM yang sedang diputar.
+        # Letakkan file di assets2/arrow_sfx.wav (atau .ogg).
+        try:
+            self.arrow_sfx = pygame.mixer.Sound("assets2/arrow_sfx.wav")
+            self.arrow_sfx.set_volume(0.6)
+        except (pygame.error, FileNotFoundError):
+            try:
+                self.arrow_sfx = pygame.mixer.Sound("assets2/arrow_sfx.ogg")
+                self.arrow_sfx.set_volume(0.6)
+            except (pygame.error, FileNotFoundError):
+                self.arrow_sfx = None   # file tidak ada → diam saja, tidak crash
+
         # ================= AFTERIMAGE =================
         self.afterimages = []
         self.afterimage_delay = 2
@@ -373,6 +387,8 @@ class Archer(BasePlayer):
 
             # 🎯 spawn arrow DI SINI (bener)
             self.spawn_arrow = True
+            if self.arrow_sfx is not None:
+                self.arrow_sfx.play()
 
         # ================= LOOP FRAME =================
         if self.frame_index >= len(frames):

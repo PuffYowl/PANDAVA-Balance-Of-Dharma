@@ -1028,20 +1028,32 @@ def show_map_overlay(current_map: int):
     close_rect = pygame.Rect(WIDTH // 2 - close_w // 2,
                              HEIGHT - close_h - 12, close_w, close_h)
 
-    # Layout 5 node peta dalam formasi: 1 di kiri, 2 di tengah atas,
-    # 3 di kanan bawah, 4 di tengah bawah, 5 di kanan atas
-    # Gunakan koordinat relatif di panel peta (panel 420×280 di tengah layar)
-    PANEL_X = WIDTH  // 2 - 210
-    PANEL_Y = HEIGHT // 2 - 155
+    # Layout peta: panel peta (360×290) kiri + panel info (260×290) kanan
+    # Total lebar: 360+14+260 = 634px → di-center di layar 960px
+    MAP_PANEL_W = 360
+    MAP_PANEL_H = 290   # diperbesar agar node tidak terlalu mepet tepi
+    INFO_W      = 260   # diperbesar agar deskripsi tidak keluar panel
+    GAP         = 14
+    TOTAL_W     = MAP_PANEL_W + GAP + INFO_W            # 634
+    PANEL_X     = (WIDTH  - TOTAL_W) // 2               # 163 — kiri panel peta
+    PANEL_Y     = HEIGHT // 2 - MAP_PANEL_H // 2 - 10  # 115 — atas panel peta
+    INFO_X      = PANEL_X + MAP_PANEL_W + GAP           # 537 — kiri panel info
+    INFO_Y      = PANEL_Y                               # rata atas dengan panel peta
+
+    # Node: Map 1 (fight) dihapus dari tampilan.
+    # Key dict = current_bg asli (2,3,4,5).
+    # Label angka visual: 2→1, 3→2, 4→3, 5→4 (supaya mulai dari 1).
+    DISPLAY_NUM = {2: "1", 3: "2", 4: "3", 5: "4"}
+    _PX = PANEL_X + 20    # margin kiri dalam panel
+    _PY = PANEL_Y + 10    # margin atas dalam panel
     NODE_POS = {
-        1: (PANEL_X + 42,  PANEL_Y + 130),   # kiri tengah
-        2: (PANEL_X + 210, PANEL_Y + 130),   # tengah
-        3: (PANEL_X + 80,  PANEL_Y + 50),    # kiri atas
-        4: (PANEL_X + 210, PANEL_Y + 220),   # bawah tengah
-        5: (PANEL_X + 340, PANEL_Y + 50),    # kanan atas
+        2: (PANEL_X + MAP_PANEL_W // 2 + 20, PANEL_Y + MAP_PANEL_H // 2 + 10),  # hub tengah
+        3: (_PX + 134,  _PY + 55),    # atas tengah  (portal kanan atas bg8)
+        4: (_PX + 40,   _PY + 117),   # kiri tengah  (portal kiri bg8)
+        5: (_PX + 108,  _PY + 196),   # bawah tengah (portal bawah bg8)
     }
-    # Koneksi antar area (edge peta)
-    EDGES = [(1, 2), (2, 3), (2, 4), (2, 5)]
+    # Koneksi antar area (edge peta) — Map 1 tidak ditampilkan
+    EDGES = [(2, 3), (2, 4), (2, 5)]
     NODE_R = 28
 
     running = True
@@ -1069,16 +1081,16 @@ def show_map_overlay(current_map: int):
         dim.fill((0, 0, 0, 175))
         screen.blit(dim, (0, 0))
 
-        # ── Panel latar peta
-        panel_surf = pygame.Surface((440, 300), pygame.SRCALPHA)
+        # ── Panel latar peta (pakai konstanta MAP_PANEL_W/H yang baru)
+        panel_surf = pygame.Surface((MAP_PANEL_W, MAP_PANEL_H), pygame.SRCALPHA)
         panel_surf.fill((15, 10, 30, 220))
-        screen.blit(panel_surf, (PANEL_X - 10, PANEL_Y - 20))
+        screen.blit(panel_surf, (PANEL_X, PANEL_Y))
         pygame.draw.rect(screen, (90, 70, 130),
-                         (PANEL_X - 10, PANEL_Y - 20, 440, 300), 2, border_radius=10)
+                         (PANEL_X, PANEL_Y, MAP_PANEL_W, MAP_PANEL_H), 2, border_radius=10)
 
         # ── Judul
         t_surf = title_font.render("✦  PETA AREA  ✦", True, GOLD)
-        screen.blit(t_surf, (WIDTH // 2 - t_surf.get_width() // 2, PANEL_Y - 52))
+        screen.blit(t_surf, (PANEL_X + MAP_PANEL_W // 2 - t_surf.get_width() // 2, PANEL_Y - 42))
 
         # ── Gambar edge / koneksi
         for a, b in EDGES:
@@ -1108,41 +1120,39 @@ def show_map_overlay(current_map: int):
                                          BLACK if is_current else col)
             screen.blit(icon_surf, icon_surf.get_rect(center=pos))
 
-            # Nomor kecil di bawah node
-            num_surf = hint_font.render(str(area_id), True, WHITE)
+            # Nomor kecil di bawah node (label visual mulai dari 1)
+            num_surf = hint_font.render(DISPLAY_NUM[area_id], True, WHITE)
             screen.blit(num_surf, (pos[0] - num_surf.get_width() // 2,
                                    pos[1] + NODE_R + 2))
 
-        # ── Panel info area saat ini (kanan layar)
-        info_x = PANEL_X + 460
-        info_y = PANEL_Y - 20
-        info_panel = pygame.Surface((220, 300), pygame.SRCALPHA)
+        # ── Panel info area saat ini (kanan panel peta, pakai INFO_X/Y/W/H baru)
+        info_panel = pygame.Surface((INFO_W, MAP_PANEL_H), pygame.SRCALPHA)
         info_panel.fill((15, 10, 30, 210))
-        screen.blit(info_panel, (info_x, info_y))
+        screen.blit(info_panel, (INFO_X, INFO_Y))
         pygame.draw.rect(screen, _MAP_AREAS[current_map]["color"],
-                         (info_x, info_y, 220, 300), 2, border_radius=10)
+                         (INFO_X, INFO_Y, INFO_W, MAP_PANEL_H), 2, border_radius=10)
 
         cur = _MAP_AREAS[current_map]
         now_surf = desc_font.render("LOKASI SEKARANG", True, (140, 130, 160))
-        screen.blit(now_surf, (info_x + 10, info_y + 10))
+        screen.blit(now_surf, (INFO_X + 10, INFO_Y + 10))
 
         name_surf = area_font.render(cur["name"], True, cur["color"])
-        screen.blit(name_surf, (info_x + 10, info_y + 34))
+        screen.blit(name_surf, (INFO_X + 10, INFO_Y + 34))
         pygame.draw.line(screen, cur["color"],
-                         (info_x + 10, info_y + 62),
-                         (info_x + 210, info_y + 62), 1)
+                         (INFO_X + 10, INFO_Y + 62),
+                         (INFO_X + INFO_W - 10, INFO_Y + 62), 1)   # ikut INFO_W baru
 
-        dy = info_y + 72
+        dy = INFO_Y + 72
         for line in cur["desc"]:
             d_surf = hint_font.render(line, True, (200, 195, 215))
-            screen.blit(d_surf, (info_x + 10, dy))
+            screen.blit(d_surf, (INFO_X + 10, dy))
             dy += 22
 
         # Legenda "Kamu di sini"
         pygame.draw.circle(screen, cur["color"],
-                           (info_x + 16, dy + 20), 8)
+                           (INFO_X + 16, dy + 20), 8)
         here_surf = hint_font.render("= Posisi kamu", True, (180, 175, 200))
-        screen.blit(here_surf, (info_x + 30, dy + 12))
+        screen.blit(here_surf, (INFO_X + 30, dy + 12))
 
         # ── Tombol tutup
         hov = close_rect.collidepoint(mouse_pos)
@@ -3190,8 +3200,6 @@ def game_loop():
             mobile_controls.set_attack_mode("use")
         else:
             mobile_controls.set_attack_mode("atk")
-
-        
 
         # Virtual joystick + attack/dash + pause button (drawn last = on top)
         # show_pause=True makes all controls visible; they are hidden on other screens
