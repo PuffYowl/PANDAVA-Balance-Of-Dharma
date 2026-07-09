@@ -119,7 +119,7 @@ class Duryudana(pygame.sprite.Sprite):
         for folder_name in ("final-boss-start-fight", "StartFight", "Startfight", "start_fight",
                              "Start", "Intro", "Prepare", "Idle"):
             path = f"{assets_folder}/{folder_name}"
-            frames = load_frames(path, 0.4)
+            frames = load_frames(path, 0.3)
             if frames:
                 startfight_frames = frames
                 print(f"[DURYUDANA] StartFight animation loaded: {path}")
